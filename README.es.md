@@ -281,7 +281,7 @@ export $(cat ~/.ironclaw/.env | grep -v "^#" | xargs)
 ironclaw run --no-onboard
 ```
 
-#### Solución de problemas con IronClaw
+#### ⚠️ Solución de problemas con IronClaw
 
 Si IronClaw no responde, se cae o devuelve errores del LLM, lanza el script de reset:
 
