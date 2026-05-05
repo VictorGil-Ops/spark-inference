@@ -26,5 +26,4 @@ litellm_settings:
   request_timeout: 300
 
 general_settings:
-  master_key: sk-spark-local
   port: 4000

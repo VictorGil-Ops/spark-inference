@@ -210,6 +210,15 @@ docker stop vllm_deepseek_r1
 # Parar todos los modelos
 docker stop vllm_nemotron_nano vllm_qwen36 vllm_deepseek_r1 2>/dev/null || true
 
+# Levantar un contenedor parado
+docker start vllm_nemotron_nano
+
+# Ver todos los contenedores parados
+docker ps -a --filter "status=exited"
+
+# Levantar todos los contenedores de modelos parados de una vez
+docker ps -a --filter "status=exited" --format "{{.Names}}" | xargs docker start
+
 # Logs en tiempo real
 docker logs -f vllm_nemotron_nano
 
@@ -270,6 +279,35 @@ ironclaw models set deepseek-r1
 # Modo CLI interactivo
 export $(cat ~/.ironclaw/.env | grep -v "^#" | xargs)
 ironclaw run --no-onboard
+```
+
+#### Solución de problemas con IronClaw
+
+Si IronClaw no responde, se cae o devuelve errores del LLM, lanza el script de reset:
+
+```bash
+bash ~/repos/spark-inference/scripts/reset-ironclaw.sh
+```
+
+El script corrige automáticamente:
+
+| Problema | Corrección |
+|---|---|
+| PID file obsoleto (otra instancia corriendo) | Elimina el PID file y mata procesos huérfanos |
+| Jobs atascados en `running`/`pending` | Los marca como `failed` |
+| Pairing requests expiradas | Las elimina |
+| Conexiones idle acumuladas en el pool | Termina conexiones por encima del umbral |
+| `activated_channels` ausente en la DB | Inserta `["telegram"]` |
+| Nombre de modelo no reconocido por LiteLLM | Fija `selected_model` al primer modelo disponible |
+| Proxy LiteLLM caído | Lo reinicia antes de arrancar IronClaw |
+
+Errores comunes y lo que corrige el script:
+
+```
+Connection pool error: error performing TLS handshake  → pool colgado, se resuelve reiniciando
+LLM error: No connected db                             → nombre de modelo o API key incorrectos
+No channels started successfully                       → activated_channels ausente en la DB
+Another IronClaw instance is already running           → PID file obsoleto
 ```
 
 ### LiteLLM proxy

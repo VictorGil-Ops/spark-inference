@@ -45,11 +45,11 @@ journalctl --user -u litellm -f
 
 # Test endpoint
 curl -s http://127.0.0.1:4000/v1/models \
-  -H "Authorization: Bearer sk-spark-local" | python3 -m json.tool
+  -H "Authorization: Bearer sk-no-key" | python3 -m json.tool
 
 # Test a model (requires Nemotron running on port 8000)
 curl -s http://127.0.0.1:4000/v1/chat/completions \
-  -H "Authorization: Bearer sk-spark-local" \
+  -H "Authorization: Bearer sk-no-key" \
   -H "Content-Type: application/json" \
   -d '{"model":"nemotron-nano","messages":[{"role":"user","content":"hello"}],"max_tokens":50}'
 
@@ -58,7 +58,7 @@ systemctl --user restart litellm
 
 # Check which models are registered
 curl -s http://127.0.0.1:4000/v1/models \
-  -H "Authorization: Bearer sk-spark-local" | \
+  -H "Authorization: Bearer sk-no-key" | \
   python3 -c "import sys,json; [print(m['id']) for m in json.load(sys.stdin)['data']]"
 ```
 

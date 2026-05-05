@@ -213,6 +213,15 @@ docker stop vllm_nemotron_nano vllm_qwen36 vllm_deepseek_r1 2>/dev/null || true
 # Remove a stopped container
 docker rm vllm_nemotron_nano
 
+# Start a stopped container
+docker start vllm_nemotron_nano
+
+# See all stopped containers
+docker ps -a --filter "status=exited"
+
+# Start all stopped model containers at once
+docker ps -a --filter "status=exited" --format "{{.Names}}" | xargs docker start
+
 # Live logs from a model
 docker logs -f vllm_nemotron_nano
 
@@ -282,6 +291,35 @@ ironclaw pairing list
 # Run interactively (CLI mode)
 export $(cat ~/.ironclaw/.env | grep -v "^#" | xargs)
 ironclaw run --no-onboard
+```
+
+#### Troubleshooting IronClaw
+
+If IronClaw is not responding, crashing, or returning LLM errors, run the reset script:
+
+```bash
+bash ~/repos/spark-inference/scripts/reset-ironclaw.sh
+```
+
+The script fixes automatically:
+
+| Problem | Fix |
+|---|---|
+| Stale PID file (another instance running) | Removes PID file, kills leftover processes |
+| Jobs stuck in `running`/`pending` | Marks them as `failed` |
+| Expired pairing requests | Deletes them |
+| Idle DB connections accumulated in pool | Terminates connections above threshold |
+| `activated_channels` missing from DB | Inserts `["telegram"]` |
+| Model name not recognized by LiteLLM | Sets `selected_model` to first available model |
+| LiteLLM proxy down | Restarts it before starting IronClaw |
+
+Common errors and what the script fixes:
+
+```
+Connection pool error: error performing TLS handshake  → stale pool, fixed by restart
+LLM error: No connected db                             → wrong model name or API key mismatch
+No channels started successfully                       → activated_channels missing in DB
+Another IronClaw instance is already running           → stale PID file
 ```
 
 ### LiteLLM proxy
