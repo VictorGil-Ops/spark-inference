@@ -1,0 +1,30 @@
+# LiteLLM Proxy Config for DGX Spark
+# Unifies all vLLM models under a single endpoint (port 4000)
+# IronClaw points to http://127.0.0.1:4000/v1
+
+model_list:
+  - model_name: nemotron-nano
+    litellm_params:
+      model: openai/nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4
+      api_base: http://127.0.0.1:8000/v1
+      api_key: sk-no-key
+
+  - model_name: qwen36
+    litellm_params:
+      model: openai/Qwen/Qwen3.6-35B-A3B-FP8
+      api_base: http://127.0.0.1:8001/v1
+      api_key: sk-no-key
+
+  - model_name: deepseek-r1
+    litellm_params:
+      model: openai/deepseek-ai/DeepSeek-R1-0528-FP8
+      api_base: http://127.0.0.1:8002/v1
+      api_key: sk-no-key
+
+litellm_settings:
+  drop_params: true
+  request_timeout: 300
+
+general_settings:
+  master_key: sk-spark-local
+  port: 4000

@@ -1,0 +1,39 @@
+# Recipe: Nemotron-3-Nano-30B W4A16 — Memory optimized for DGX Spark
+# Use when RAM is tight and Nemotron-NVFP4 doesn't fit
+# Memory: ~18GB | tok/s: ~42
+recipe_version: "1"
+name: Nemotron-3-Nano-NVFP4-W4A16
+description: vLLM serving Nemotron-3-Nano W4A16 — low RAM alternative orchestrator (port 8000)
+
+model: cybermotaz/nemotron3-nano-nvfp4-w4a16
+container: vllm-node
+solo_only: true
+
+mods:
+  - mods/nemotron-nano
+
+defaults:
+  port: 8000
+  host: 0.0.0.0
+  tensor_parallel: 1
+  gpu_memory_utilization: 0.15
+  max_model_len: 32768
+  max_num_seqs: 8
+
+command: |
+  vllm serve cybermotaz/nemotron3-nano-nvfp4-w4a16 \
+    --host {host} \
+    --port {port} \
+    --max-model-len {max_model_len} \
+    --gpu-memory-utilization {gpu_memory_utilization} \
+    --max-num-seqs {max_num_seqs} \
+    --enforce-eager \
+    --quantization modelopt_fp4 \
+    --kv-cache-dtype fp8 \
+    --enable-prefix-caching \
+    --load-format fastsafetensors \
+    --trust-remote-code \
+    --enable-auto-tool-choice \
+    --tool-call-parser qwen3_coder \
+    --reasoning-parser-plugin nano_v3_reasoning_parser.py \
+    --reasoning-parser nano_v3

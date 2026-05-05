@@ -1,0 +1,56 @@
+# Recipe: Nemotron-3-Super-120B NVFP4 — SINGLE POWERFUL MODE
+# Use when maximum quality is needed with a single model
+# REQUIRES: stop other containers before starting
+# RAM: ~87GB | tok/s: ~17-20 | Contexto: 262k
+recipe_version: "1"
+name: Nemotron-3-Super-120B-NVFP4
+description: |
+  MODO SINGLE POWERFUL - Para el resto de containers antes de usar.
+  Nemotron-3-Super-120B con arquitectura LatentMoE + Mamba-2.
+  Reasoning nativo, agentic, coding. 120B total / 12B activos.
+
+model: nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4
+
+container: vllm-node
+
+solo_only: true
+
+mods:
+  - mods/nemotron-super
+
+env:
+  VLLM_FLASHINFER_ALLREDUCE_BACKEND: trtllm
+  VLLM_ALLOW_LONG_MAX_MODEL_LEN: 1
+  VLLM_NVFP4_GEMM_BACKEND: marlin
+  VLLM_USE_FLASHINFER_MOE_FP4: 0
+
+defaults:
+  port: 8000
+  host: 0.0.0.0
+  tensor_parallel: 1
+  gpu_memory_utilization: 0.90
+  max_model_len: 131072
+  max_num_seqs: 4
+  max_num_batched_tokens: 8192
+
+command: |
+  vllm serve nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4 \
+    --host {host} \
+    --port {port} \
+    --kv-cache-dtype fp8 \
+    --moe-backend cutlass \
+    --trust-remote-code \
+    --gpu-memory-utilization {gpu_memory_utilization} \
+    --max-model-len {max_model_len} \
+    --max-num-seqs {max_num_seqs} \
+    --max-num-batched-tokens {max_num_batched_tokens} \
+    --enable-prefix-caching \
+    --enable-auto-tool-choice \
+    --load-format fastsafetensors \
+    --tool-call-parser qwen3_coder \
+    --reasoning-parser-plugin super_v3_reasoning_parser.py \
+    --reasoning-parser super_v3 \
+    --mamba_ssm_cache_dtype float32 \
+    --tensor-parallel-size {tensor_parallel} \
+    --attention-backend flashinfer \
+    --compilation-config '{{"cudagraph_capture_sizes":[1,2,4]}}'
