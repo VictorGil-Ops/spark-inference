@@ -25,7 +25,7 @@ cd ~/repos/spark-vllm-docker && ./build-and-copy.sh
 ### Paso 2 — Clonar este repo
 
 ```bash
-git clone https://github.com/YOUR_USER/dev-private-spark-inference.git ~/repos/dev-private-spark-inference
+git clone https://github.com/VictorGil-Ops/dev-private-spark-inference.git ~/repos/dev-private-spark-inference
 ```
 
 ### Paso 3 — Instalar IronClaw (agente + Telegram)
