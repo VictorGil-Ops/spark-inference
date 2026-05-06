@@ -15,7 +15,7 @@ Construido sobre [eugr/spark-vllm-docker](https://github.com/eugr/spark-vllm-doc
 
 Sigue estos pasos en orden:
 
-### Paso 1 — Construir el contenedor base (una vez, ~8 min)
+### Paso 1 — Construir el contenedor base (una vez, ~30 min)
 
 ```bash
 git clone https://github.com/eugr/spark-vllm-docker.git ~/repos/spark-vllm-docker
@@ -235,7 +235,7 @@ sudo systemctl is-enabled postgresql           # debe mostrar "enabled"
 
 ## Hallazgos clave en SM12.1
 
-- CUDA graphs: **5.4x de aceleración** vs modo eager (58.6 vs 10.9 tok/s)
+- CUDA graphs: **5.4x de aceleración** vs modo eager (58 vs 46 tok/s)
 - `gpu_memory_utilization 0.25` ahorra ~60GB frente al valor por defecto (ver [post de sggin1](https://forums.developer.nvidia.com/t/364886))
 - Backend de atención FlashInfer requerido (FlashAttn no soporta SM12.1)
 - `VLLM_FLASHINFER_MOE_BACKEND=latency` requerido (el backend throughput crashea)
