@@ -26,9 +26,6 @@ launch() {
     awk '/MemAvailable/{printf "  Available: %.1f GB\n", $2/1048576}' /proc/meminfo
     echo ""
 
-    mkdir -p "$HOME/.ironclaw"
-    echo "$recipe" > "$HOME/.ironclaw/last_model"
-
     echo "Starting: ${recipe} → container: ${cname}"
     # Strip any -d from caller args to avoid duplication; we always run detached
     local extra=()
@@ -123,7 +120,7 @@ for fname in os.listdir('$RECIPES_DIR'):
     echo ""
     read -rp "  Delete from cache? [y/N]: " c
     if [[ "$c" =~ ^[yY] ]]; then
-        rm -rf "$cache_path"
+        sudo chmod -R u+w "$cache_path" && sudo rm -rf "$cache_path"
         echo "  ✓ Deleted (${size} freed)"
     else
         echo "  Cancelled."
