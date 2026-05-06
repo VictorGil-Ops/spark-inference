@@ -1,0 +1,22 @@
+#!/bin/bash
+# Blocks accidental pushes to the upstream production repository.
+# Run setup-local.sh after cloning to install this hook.
+
+REMOTE="$1"
+URL="$2"
+
+if echo "$URL" | grep -qi "VictorGil-Ops/dev-private-spark-inference\|VictorGil-Ops/spark-inference"; then
+    echo ""
+    echo "  ✗  Push blocked — this is the upstream production repository."
+    echo ""
+    echo "     To contribute changes, fork the repo and push to your fork:"
+    echo "       git remote add myfork https://github.com/<your-user>/<repo>.git"
+    echo "       git push myfork <branch>"
+    echo ""
+    echo "     To re-enable push (repo owner only):"
+    echo "       git remote set-url --push origin <original-url>"
+    echo ""
+    exit 1
+fi
+
+exit 0

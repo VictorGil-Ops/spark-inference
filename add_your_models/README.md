@@ -1,5 +1,19 @@
 # Adding Models to the DGX Spark Stack
 
+## Before you start — protect the upstream repo
+
+After cloning, run this once:
+
+```bash
+bash setup-local.sh
+```
+
+It disables `git push` to the upstream repo and installs a pre-push hook.
+Your local changes are yours — pull updates freely, but pushes require an
+explicit fork remote. See `setup-local.sh` for details.
+
+---
+
 Two files need to be edited to add a new model:
 
 1. `recipes/<your-model>.yaml` — tells vLLM how to serve it
