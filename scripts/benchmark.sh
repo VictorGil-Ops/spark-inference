@@ -13,8 +13,10 @@ RESET='\033[0m'
 record_result() {
     local port="$1" model="$2" toks_per_sec="$3"
 
-    local ram mode
-    read -r ram mode < <(python3 - "$RECIPES_DIR" "$port" <<'PYEOF'
+    local ram mode container_name
+    # RAM from recipe (matched by port)
+    local ram
+    ram=$(python3 - "$RECIPES_DIR" "$port" <<'PYEOF'
 import sys, os, re
 recipes_dir, port = sys.argv[1], sys.argv[2]
 for fname in os.listdir(recipes_dir):
@@ -23,16 +25,35 @@ for fname in os.listdir(recipes_dir):
     if re.search(r'port:\s*' + port + r'\b', raw):
         m = re.search(r'#\s*(?:Memory|RAM):\s*~?(\d+)GB', raw, re.IGNORECASE)
         if m:
-            ram = m.group(1) + 'GB'
-        else:
-            u = re.search(r'gpu_memory_utilization:\s*([\d.]+)', raw)
-            ram = str(round(float(u.group(1)) * 128)) + 'GB' if u else '?'
-        mode = 'Eager' if '--enforce-eager' in raw else 'CUDA graphs'
-        print(ram, mode)
-        sys.exit(0)
-print('? ?')
+            print(m.group(1) + 'GB'); sys.exit(0)
+        u = re.search(r'gpu_memory_utilization:\s*([\d.]+)', raw)
+        print(str(round(float(u.group(1)) * 128)) + 'GB' if u else '?'); sys.exit(0)
+print('?')
 PYEOF
     )
+
+    # Find the container actually listening on this port (host network — filter by port arg)
+    local container_name mode
+    container_name=$(docker ps --format '{{.Names}}' --filter 'name=vllm_' 2>/dev/null \
+        | while read -r cname; do
+            docker exec "$cname" ps aux 2>/dev/null \
+                | grep -q "vllm serve.*--port[[:space:]]${port}\b" && echo "$cname" && break
+          done)
+
+    if [ -n "$container_name" ]; then
+        local proc_flag
+        proc_flag=$(docker exec "$container_name" ps aux 2>/dev/null \
+            | grep vllm \
+            | grep -o "compilation-config\|enforce-eager" \
+            | head -1)
+        case "$proc_flag" in
+            enforce-eager)      mode="Eager" ;;
+            compilation-config) mode="CUDA graphs" ;;
+            *)                  mode="CUDA graphs" ;;  # vLLM default when no explicit flag
+        esac
+    else
+        mode="?"
+    fi
 
     local ts
     ts=$(date '+%Y-%m-%d %H:%M')

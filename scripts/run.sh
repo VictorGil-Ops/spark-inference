@@ -26,6 +26,40 @@ launch() {
     awk '/MemAvailable/{printf "  Available: %.1f GB\n", $2/1048576}' /proc/meminfo
     echo ""
 
+    # Warn if an existing container was launched with a different execution mode
+    if docker inspect "$cname" >/dev/null 2>&1; then
+        local recipe_eager container_eager
+        recipe_eager=$(python3 -c "
+import re, sys
+raw = open('${RECIPES_DIR}/${recipe}.yaml').read()
+print('yes' if '--enforce-eager' in raw else 'no')
+")
+        container_eager=$(docker inspect "$cname" \
+            --format '{{range .Config.Cmd}}{{.}} {{end}} {{range .Config.Entrypoint}}{{.}} {{end}}' \
+            2>/dev/null | grep -q "enforce-eager" && echo "yes" || echo "no")
+
+        if [ "$recipe_eager" != "$container_eager" ]; then
+            echo ""
+            if [ "$recipe_eager" = "no" ]; then
+                echo "  ⚠  Switching to CUDA graphs mode."
+                echo "     Container '${cname}' was previously loaded in eager mode."
+            else
+                echo "  ⚠  Switching to eager mode."
+                echo "     Container '${cname}' was previously loaded with CUDA graphs."
+            fi
+            echo "     The cached container state may conflict. Remove it for a clean load:"
+            echo ""
+            echo "       docker rm ${cname}"
+            echo ""
+            read -rp "  Remove container now and continue? [Y/n]: " c
+            if [[ ! "$c" =~ ^[nN] ]]; then
+                docker rm "$cname" >/dev/null 2>&1 || true
+                echo "  ✓ Container removed"
+            fi
+            echo ""
+        fi
+    fi
+
     echo "Starting: ${recipe} → container: ${cname}"
     # Strip any -d from caller args to avoid duplication; we always run detached
     local extra=()
@@ -167,6 +201,9 @@ USED_GB=$((TOTAL_GB - AVAIL_GB))
 echo "=== DGX Spark — Model Launcher ==="
 echo ""
 echo "Memory: ${USED_GB}GB used / ${TOTAL_GB}GB total  (${AVAIL_GB}GB free)"
+echo ""
+echo "  Note: to switch between CUDA graphs / Eager variants of the same model,"
+echo "        stop the container and delete its cached compilation artifacts first (d <num>)."
 echo ""
 
 RUNNING_CONTAINERS=$(docker ps --format "{{.Names}}" 2>/dev/null | grep "^vllm" | tr '\n' ',' || true)
