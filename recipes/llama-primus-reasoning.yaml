@@ -1,0 +1,35 @@
+# Recipe: Llama-Primus-Reasoning — Cybersecurity specialist
+# By Trend Micro AI Lab — reasoning distilled from o1-preview + DeepSeek-R1
+# CISSP benchmark: 80.75% (beats o1-preview 80.35%)
+# Architecture: Llama-3.1-8B — standard Transformer, FlashInfer compatible
+# Memory: ~35GB | tok/s: ~14
+recipe_version: "1"
+name: Llama-Primus-Reasoning
+description: Cybersecurity reasoning model by Trend Micro — pentest, OSINT, CISSP (port 8002)
+
+model: trendmicro-ailab/Llama-Primus-Reasoning
+container: vllm-node
+solo_only: true
+
+defaults:
+  port: 8002
+  host: 0.0.0.0
+  tensor_parallel: 1
+  gpu_memory_utilization: 0.25
+  max_model_len: 32768
+  max_num_seqs: 8
+
+command: |
+  vllm serve trendmicro-ailab/Llama-Primus-Reasoning \
+    --host {host} \
+    --port {port} \
+    --max-model-len {max_model_len} \
+    --gpu-memory-utilization {gpu_memory_utilization} \
+    --max-num-seqs {max_num_seqs} \
+    --enforce-eager \
+    --reasoning-parser granite \
+    --kv-cache-dtype fp8 \
+    --load-format fastsafetensors \
+    --attention-backend flashinfer \
+    --enable-prefix-caching \
+    --trust-remote-code

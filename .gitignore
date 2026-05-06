@@ -1,4 +1,5 @@
 .env
+BENCHMARKS.md
 *.log
 __pycache__/
 *.pyc
@@ -6,3 +7,4 @@ __pycache__/
 models/
 wheels/
 .cache/
+.private/

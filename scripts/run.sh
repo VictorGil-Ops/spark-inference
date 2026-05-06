@@ -9,36 +9,62 @@ RECIPES_DIR="$(cd "$(dirname "$0")/.." && pwd)/recipes"
 HF_CACHE="${HF_HOME:-$HOME/.cache/huggingface}/hub"
 
 # ── Map recipe name → Docker container name ───────────────────────────────────
+# Deterministic: vllm_ + slug with - and . replaced by _
 container_name() {
-    local recipe="$1"
-    case "$recipe" in
-        single-nemotron*)  echo "vllm_nemotron_super" ;;
-        single-qwen3*)     echo "vllm_qwen3_235b" ;;
-        qwen3*)            echo "vllm_qwen36" ;;
-        nemotron*nano*w4*) echo "vllm_nemotron_w4a16" ;;
-        nemotron*)         echo "vllm_nemotron_nano" ;;
-        deepseek*)         echo "vllm_deepseek_r1" ;;
-        *)                 echo "vllm_$(echo "$recipe" | tr -- '-.' '__')" ;;
-    esac
+    echo "vllm_$(echo "$1" | tr -- '-.' '__')"
 }
 
 # ── Launch a recipe ───────────────────────────────────────────────────────────
 launch() {
     local recipe="$1"; shift
-    local cname
+    local cname port
     cname=$(container_name "$recipe")
+    port=$(python3 -c "import re,sys; raw=open('${RECIPES_DIR}/${recipe}.yaml').read(); m=re.search(r'port:\s*(\d+)',raw); print(m.group(1) if m else '8000')")
 
     echo "--- Flushing memory cache ---"
     sudo sh -c 'sync; echo 3 > /proc/sys/vm/drop_caches' 2>/dev/null || true
     awk '/MemAvailable/{printf "  Available: %.1f GB\n", $2/1048576}' /proc/meminfo
     echo ""
 
+    mkdir -p "$HOME/.ironclaw"
+    echo "$recipe" > "$HOME/.ironclaw/last_model"
+
     echo "Starting: ${recipe} → container: ${cname}"
+    # Strip any -d from caller args to avoid duplication; we always run detached
+    local extra=()
+    for arg in "$@"; do [[ "$arg" != "-d" ]] && extra+=("$arg"); done
+
     cd "$SPARK_VLLM_DIR" && \
         ./run-recipe.sh "${RECIPES_DIR}/${recipe}.yaml" \
         --name "$cname" \
         --solo \
-        "$@"
+        -d \
+        "${extra[@]}"
+
+    # Stream logs in background, stop when health endpoint is ready
+    echo ""
+    echo "--- Logs (port ${port} — CUDA graph capture ~5-10 min) ---"
+    docker logs -f "$cname" 2>&1 &
+    local logs_pid=$!
+
+    local ready=0
+    for i in $(seq 1 240); do
+        sleep 5
+        if curl -sf "http://localhost:${port}/health" >/dev/null 2>&1; then
+            ready=1
+            break
+        fi
+    done
+
+    kill "$logs_pid" 2>/dev/null
+    wait "$logs_pid" 2>/dev/null
+
+    echo ""
+    if [ "$ready" -eq 1 ]; then
+        echo "✓ ${cname} ready on port ${port} ($((i * 5))s)"
+    else
+        echo "⚠ Timeout after 20 min — check: docker logs ${cname}"
+    fi
 }
 
 # ── Unload a model from memory (stop its container) ──────────────────────────
@@ -52,6 +78,55 @@ unload_model() {
         echo "  ✓ ${cname} stopped — RAM freed"
     else
         echo "  ✗ ${cname} is not running"
+    fi
+}
+
+# ── Delete a model from the local HuggingFace cache ──────────────────────────
+delete_cache() {
+    local model_id="$1"
+    local cache_name
+    cache_name="models--$(echo "$model_id" | sed 's|/|--|g')"
+    local cache_path="$HF_CACHE/$cache_name"
+
+    if [ ! -d "$cache_path" ]; then
+        echo "  Not cached: ${model_id}"
+        return
+    fi
+
+    # Block deletion if the model's container is running
+    local slug
+    slug=$(python3 -c "
+import os, re, sys
+model_id = sys.argv[1]
+for fname in os.listdir('$RECIPES_DIR'):
+    if not fname.endswith('.yaml'): continue
+    raw = open(os.path.join('$RECIPES_DIR', fname)).read()
+    m = re.search(r'^model:\s*(.+)', raw, re.MULTILINE)
+    if m and m.group(1).strip() == model_id:
+        print(fname[:-5]); sys.exit(0)
+" "$model_id" 2>/dev/null)
+    if [ -n "$slug" ]; then
+        local cname
+        cname=$(container_name "$slug")
+        if docker inspect "$cname" --format '{{.State.Running}}' 2>/dev/null | grep -q true; then
+            echo "  ✗ Cannot delete: ${cname} is running. Unload it first (x<num>)."
+            return
+        fi
+    fi
+
+    local size
+    size=$(du -sh "$cache_path" 2>/dev/null | cut -f1)
+    echo ""
+    echo "  Model : ${model_id}"
+    echo "  Path  : ${cache_path}"
+    echo "  Size  : ${size}"
+    echo ""
+    read -rp "  Delete from cache? [y/N]: " c
+    if [[ "$c" =~ ^[yY] ]]; then
+        rm -rf "$cache_path"
+        echo "  ✓ Deleted (${size} freed)"
+    else
+        echo "  Cancelled."
     fi
 }
 
@@ -108,12 +183,6 @@ running_ctrs = set(sys.argv[3].split(',')) if sys.argv[3] else set()
 hf_cache     = sys.argv[4]
 
 def container_name(slug):
-    if slug.startswith('single-nemotron'): return 'vllm_nemotron_super'
-    if slug.startswith('single-qwen3'):    return 'vllm_qwen3_235b'
-    if slug.startswith('qwen3'):           return 'vllm_qwen36'
-    if 'nano' in slug and 'w4' in slug:    return 'vllm_nemotron_w4a16'
-    if 'nemotron' in slug:                 return 'vllm_nemotron_nano'
-    if 'deepseek' in slug:                 return 'vllm_deepseek_r1'
     return 'vllm_' + slug.replace('-', '_').replace('.', '_')
 
 def is_cached(model_id, hf_cache):
@@ -202,6 +271,7 @@ printf "  \033[32m●\033[0m running   \033[36m✓\033[0m cached locally   ⚠ e
 echo ""
 echo "  [x <num>]  Unload from memory (stop container)   (e.g. x2)"
 echo "  [h <num>]  Download from HuggingFace             (e.g. h5)"
+echo "  [d <num>]  Delete from local cache               (e.g. d3)"
 echo "  [q]        Quit"
 echo ""
 read -rp "Select model (1-${COUNT}): " sel
@@ -230,6 +300,17 @@ if [[ "$sel" =~ ^[hH][[:space:]]*([0-9]+)$ ]]; then
         exit 1
     fi
     download_hf "${MODEL_IDS[$((idx-1))]}"
+    exit $?
+fi
+
+# Delete from local cache: d<num>
+if [[ "$sel" =~ ^[dD][[:space:]]*([0-9]+)$ ]]; then
+    idx="${BASH_REMATCH[1]}"
+    if [ "$idx" -lt 1 ] || [ "$idx" -gt "$COUNT" ]; then
+        echo "Invalid selection."
+        exit 1
+    fi
+    delete_cache "${MODEL_IDS[$((idx-1))]}"
     exit $?
 fi
 

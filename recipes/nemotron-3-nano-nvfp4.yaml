@@ -1,6 +1,6 @@
 # Recipe: Nemotron-3-Nano-NVFP4 — Memory optimized for DGX Spark
 # Based on sggin1's memory analysis (forums.developer.nvidia.com/t/364886)
-# Memory: ~32GB (vs 117GB default) | tok/s: ~50-58
+# Memory: ~32GB | tok/s: ~50-58
 recipe_version: "1"
 name: Nemotron-3-Nano-NVFP4
 description: vLLM serving Nemotron-3-Nano-NVFP4 — memory optimized for multi-model stack

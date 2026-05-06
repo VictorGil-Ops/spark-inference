@@ -13,10 +13,10 @@ mods:
   - mods/nemotron-nano
 
 defaults:
-  port: 8000
+  port: 8004
   host: 0.0.0.0
   tensor_parallel: 1
-  gpu_memory_utilization: 0.15
+  gpu_memory_utilization: 0.25
   max_model_len: 32768
   max_num_seqs: 8
 

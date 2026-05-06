@@ -6,18 +6,11 @@ IronClaw points to this proxy to route between models by name.
 ## Install / Update
 
 ```bash
-bash ~/repos/dev-private-spark-inference/ironclaw/litellm/install.sh
+bash ~/repos/spark-inference/ironclaw/litellm/install.sh
 ```
 
 Re-run at any time to update LiteLLM or apply config changes.
 
-## Models
-
-| Name | Port | RAM | Role |
-|------|------|-----|------|
-| `nemotron-nano` | 8000 | ~32GB | Orchestrator |
-| `qwen36` | 8001 | ~45GB | Coding + Vision |
-| `deepseek-r1` | 8002 | ~25GB | Reasoning + Pentest |
 
 ## Reconfigure IronClaw
 

@@ -1,4 +1,4 @@
-# dev-private-spark-inference
+# spark-inference
 
 Personal inference stack for NVIDIA DGX Spark (GB10 / SM12.1 Blackwell).
 Built on top of [eugr/spark-vllm-docker](https://github.com/eugr/spark-vllm-docker).
@@ -25,70 +25,92 @@ cd ~/repos/spark-vllm-docker && ./build-and-copy.sh
 ### Step 2 — Clone this repo
 
 ```bash
-git clone https://github.com/VictorGil-Ops/dev-private-spark-inference.git ~/repos/dev-private-spark-inference
+git clone https://github.com/VictorGil-Ops/spark-inference.git ~/repos/spark-inference
 ```
 
-### Step 3 — Install IronClaw (agent + Telegram)
+### Step 3 — Launch the control panel
+
+From here you can install and manage everything:
 
 ```bash
-bash ~/repos/dev-private-spark-inference/ironclaw/install.sh <telegram_bot_token> <telegram_user_id>
+cd ~/repos/spark-inference
+./spark.sh
 ```
+
+It prints a banner explaining the logical flow (vLLM → LiteLLM → IronClaw → WebUI), shows live system status, and offers a menu delegating to each sub-script:
+
+```
+  ╔══════════════════════════════════════════════════════════════╗
+  ║           DGX Spark — Personal Inference Stack              ║
+  ║     NVIDIA GB10 · 128 GB unified · SM12.1 Blackwell         ║
+  ╚══════════════════════════════════════════════════════════════╝
+
+  System    57GB / 122GB RAM used  (65GB free)
+  Models    vllm_nemotron3_nano_nvfp4_w4a16
+  LiteLLM   running
+  IronClaw  running
+  WebUI     running  → http://localhost:3000
+  Watchdog  enabled  (fires 5 min after boot)
+
+  [1] Recovery & Watchdog   start-all.sh
+  [2] Models                run.sh  (launch · unload · download)
+  [3] Benchmark             benchmark.sh
+  [4] Open WebUI            webui.sh
+  [5] IronClaw Setup        setup.sh  (install · change model)
+  [6] Reset IronClaw        reset-ironclaw.sh
+```
+
+### Step 4 — Install IronClaw (agent + Telegram)
+
+From the control panel select **[5] IronClaw Setup**, then **[1] Install IronClaw**. The wizard asks for:
+
+- Telegram bot token and your numeric user ID
+- DB user / password (defaults: `ironclaw_user` / `ironclaw`)
+- Default model (picks from the LiteLLM config)
 
 After first start, approve the Telegram pairing code:
 ```bash
 ironclaw pairing approve telegram <CODE>
 ```
 
-### Step 4 — Install LiteLLM proxy (multi-model routing)
+### Step 5 — Install LiteLLM proxy (multi-model routing)
 
 ```bash
-bash ~/repos/dev-private-spark-inference/ironclaw/litellm/install.sh
+bash ~/repos/spark-inference/ironclaw/litellm/install.sh
 ```
 
-Then point IronClaw to the proxy:
-```bash
-ironclaw onboard --step provider
-# Select: OpenAI-compatible
-# URL: http://127.0.0.1:4000/v1
-# API key: sk-spark-local
-# Model: nemotron-nano
-```
+This registers the proxy as a systemd user service on port 4000. Once running, switch models anytime from the control panel: **[5] IronClaw Setup → [2] Change default model**.
 
-### Step 5 — Start the models
+### Step 6 — Start the models
 
-> ⚠️ All recipes are designed for **multi-model mode** (3 models running simultaneously, ~102GB total).
+> ⚠️ All recipes are designed for **multi-model mode** (2-3 models running simultaneously, ~120GB total).
 > If you need maximum quality for a single task, use **Single Powerful Mode** instead (see below).
 
 ```bash
-cd ~/repos/dev-private-spark-inference
-
-# Start all three models
-./scripts/run.sh nemotron-3-nano-nvfp4 -d    # orchestrator  — port 8000, ~32GB
-./scripts/run.sh qwen3.6-35b-fp8 -d          # coding+vision — port 8001, ~45GB
-./scripts/run.sh deepseek-r1-32b-fp8 -d      # reasoning     — port 8002, ~25GB
-
-# Verify
-./scripts/benchmark.sh 8000
-```
-
-`run.sh` also works interactively — run it without arguments to pick from a menu that shows all available recipes with estimated RAM, tok/s, context length, and a `●` next to models already running:
-
-```
+cd ~/repos/spark-inference
 ./scripts/run.sh
+```
 
+`run.sh` shows all available recipes with estimated RAM, tok/s, context length, and a `●` next to models already running:
+
+```
 === DGX Spark — Model Launcher ===
 Memory: 57GB used / 122GB total  (65GB free)
 
   #       Recipe                              Port     RAM   tok/s    ctx
   ---  --  ----------------------------------  -----  -----  ------  -----
-  1    ●   deepseek-r1-32b-fp8                 8002     25GB   20-25    32k
-  2    ●   nemotron-3-nano-nvfp4               8000     32GB   50-58    32k
-  3        nemotron3-nano-nvfp4-w4a16          8000     18GB      42    32k
-  4    ●   qwen3.6-35b-fp8                     8001     45GB   28-30    32k
-  5        single-nemotron-super-120b          8000     87GB   17-20   128k ⚠
-  6        single-qwen3-235b-int4              8000    115GB   15-18    32k ⚠
+  1    ●   nemotron-3-nano-nvfp4               8000     35GB   50-58    32k
+  2        nemotron3-nano-nvfp4-w4a16          8004     35GB   45-52    32k
+  3    ●   qwen3.6-35b-fp8                     8001     45GB   28-30    32k
+  4        single-nemotron-super-120b          8100     87GB   17-20   128k ⚠
 
-Select model (1-6):
+  ● running   ✓ cached locally   ⚠ exceeds free RAM
+
+  [x <num>]  Unload from memory (stop container)
+  [h <num>]  Download from HuggingFace
+  [d <num>]  Delete from local cache
+
+Select model (1-4):
 ```
 
 ---
@@ -104,9 +126,9 @@ IronClaw → LiteLLM Proxy (port 4000)
 ┌──────────┼──────────┐
 ▼          ▼          ▼
 port 8000  port 8001  port 8002
-Nemotron-Nano Qwen3.6   DeepSeek-R1
-(orchestrator) (coding)  (reasoning)
-~32GB       ~45GB      ~25GB
+Nemotron-Nano Qwen3.6   Llama-primus
+(orchestrator) (coding) (reasoning)
+~32GB       ~45GB      ~35GB
 ```
 
 ### Model routing
@@ -115,7 +137,7 @@ Nemotron-Nano Qwen3.6   DeepSeek-R1
 |------------|------|-----|----------|
 | `nemotron-nano` | 8000 | ~32GB | Fast responses, routing decisions |
 | `qwen36` | 8001 | ~45GB | Code generation, vision, complex agents |
-| `deepseek-r1` | 8002 | ~25GB | Deep reasoning, pentest, OSINT |
+| `llama-primus` | 8002 | ~35GB | reasoning, pentest, OSINT |
 
 Switch model manually:
 ```bash
@@ -132,15 +154,12 @@ Use for deep analysis, complex CTF, long-context coding, or max-quality tasks.
 
 ```bash
 # Stop multi-model stack first
-docker stop vllm_nemotron_nano vllm_qwen36 vllm_deepseek_r1 2>/dev/null || true
+docker stop vllm_nemotron_nano vllm_qwen36 2>/dev/null || true
 
 # Option A — Nemotron-3-Super-120B (best for reasoning + agentic)
 # RAM: ~87GB | tok/s: ~17-20 | Context: 131k
 ./scripts/run.sh single-nemotron-super-120b -d
 
-# Option B — Qwen3-235B-A22B FP8 (best for coding + complex agents)
-# RAM: ~115GB | tok/s: ~15-18 | Context: 32k
-./scripts/run.sh single-qwen3-235b-int4 -d
 ```
 
 Return to multi-model mode:
@@ -148,46 +167,65 @@ Return to multi-model mode:
 docker stop vllm_nemotron_super vllm_qwen3_235b 2>/dev/null || true
 ./scripts/run.sh nemotron-3-nano-nvfp4 -d
 ./scripts/run.sh qwen3.6-35b-fp8 -d
-./scripts/run.sh deepseek-r1-32b-fp8 -d
 ```
 
 ---
 
-## Persistence on Reboot
+## Recovery & Watchdog
 
-### vLLM models
+### Interactive recovery (after reboot)
 
-Models do NOT auto-start on reboot. Use the start script:
 ```bash
-bash ~/repos/dev-private-spark-inference/scripts/start-all.sh
+bash ~/repos/spark-inference/scripts/start-all.sh
+# or via the control panel: ./spark.sh → [1]
 ```
 
-Auto-start on login:
+The menu shows current memory, last model, and watchdog status, then offers:
+- **[1] Recover** — starts the last model + LiteLLM + IronClaw
+- **[2] Launch model** — opens the `run.sh` interactive picker
+- **[3] LiteLLM only**
+- **[4] IronClaw only**
+- **[5] Install / remove watchdog**
+
+### Watchdog (auto-recovery on boot)
+
+A systemd user timer (`spark-watchdog.timer`) that fires 5 minutes after boot and runs `start-all.sh --auto`.
+
 ```bash
-echo 'bash ~/repos/dev-private-spark-inference/scripts/start-all.sh' >> ~/.bashrc
+# Install (from menu [5], or directly)
+bash ~/repos/spark-inference/scripts/start-all.sh --install-watchdog
+
+# Remove
+bash ~/repos/spark-inference/scripts/start-all.sh --uninstall-watchdog
 ```
 
-### IronClaw (systemd — auto-starts on reboot)
-```bash
-systemctl --user is-enabled ironclaw   # should show "enabled"
-systemctl --user status ironclaw       # check after reboot
-```
+What `--auto` does in order:
+1. Checks network — reconnects via `nmcli` if needed
+2. Launches `~/.ironclaw/last_model` — **skips** if the model requires > 97% of total RAM
+3. Starts LiteLLM (polls health endpoint until ready)
+4. Starts IronClaw
 
-Enable lingering (start without login session):
+Enable lingering so the timer fires even without an active login session:
 ```bash
 sudo loginctl enable-linger $USER
 ```
 
-### PostgreSQL (auto-starts on reboot)
+The last launched model is written automatically by `run.sh` and `setup.sh model` to `~/.ironclaw/last_model`.
+
 ```bash
-sudo systemctl is-enabled postgresql   # should show "enabled"
+# Check watchdog status
+systemctl --user status spark-watchdog.timer
+journalctl --user -u spark-watchdog.service -n 50 --no-pager
 ```
 
-### Quick recovery after reboot
+### Services that auto-start on reboot (no watchdog needed)
+
 ```bash
-bash ~/repos/dev-private-spark-inference/scripts/start-all.sh
-systemctl --user status ironclaw
-curl http://localhost:8000/health
+# IronClaw and LiteLLM — managed by systemd user services
+systemctl --user is-enabled ironclaw litellm   # should show "enabled"
+
+# PostgreSQL
+sudo systemctl is-enabled postgresql           # should show "enabled"
 ```
 
 ---
@@ -201,14 +239,6 @@ curl http://localhost:8000/health
 - CUTLASS FP4 kernels fall back to Marlin on SM12.1
 - `--enforce-eager` saves 13GB with only 3% tok/s loss for single-user
 - TurboQuant KV compression: PR #38479 not merged yet
-
-## Benchmarks
-
-| Model | Mode | tok/s | RAM |
-|-------|------|-------|-----|
-| Nemotron-3-Nano NVFP4 | CUDA graphs | **58.6** | ~32GB |
-| Nemotron-3-Nano NVFP4 | Eager | 10.9 | ~32GB |
-| Qwen3.6-35B-A3B FP8 | CUDA graphs | **33.9** | ~45GB |
 
 ---
 
@@ -226,10 +256,9 @@ docker ps -a
 # Stop a model
 docker stop vllm_nemotron_nano
 docker stop vllm_qwen36
-docker stop vllm_deepseek_r1
 
 # Stop all models
-docker stop vllm_nemotron_nano vllm_qwen36 vllm_deepseek_r1 2>/dev/null || true
+docker stop vllm_nemotron_nano vllm_qwen36 2>/dev/null || true
 
 # Remove a stopped container
 docker rm vllm_nemotron_nano
@@ -256,6 +285,28 @@ docker stats --no-stream
 watch -n1 "awk '/MemTotal/{t=\$2}/MemAvailable/{a=\$2}END{printf \"Used: %.1f GB / %.1f GB\n\",(t-a)/1048576,t/1048576}' /proc/meminfo"
 ```
 
+### Open WebUI
+
+Browser chat UI connected to the LiteLLM proxy (port 4000). Port persisted in `~/.ironclaw/webui.conf`.
+
+```bash
+# Interactive menu (install · start · stop · port · update · remove)
+bash ~/repos/spark-inference/scripts/webui.sh
+# or via the control panel: ./spark.sh → [4]
+
+# Direct commands
+bash ~/repos/spark-inference/scripts/webui.sh install
+bash ~/repos/spark-inference/scripts/webui.sh start
+bash ~/repos/spark-inference/scripts/webui.sh stop
+bash ~/repos/spark-inference/scripts/webui.sh restart
+bash ~/repos/spark-inference/scripts/webui.sh port 3001   # change host port (recreates container)
+bash ~/repos/spark-inference/scripts/webui.sh update      # pull latest image
+bash ~/repos/spark-inference/scripts/webui.sh status
+bash ~/repos/spark-inference/scripts/webui.sh remove      # stop + remove container (data volume kept)
+```
+
+Default port: 3000. The data volume (`open-webui`) is preserved across removes and updates.
+
 ### vLLM — model health & performance
 
 ```bash
@@ -269,10 +320,11 @@ curl -s http://localhost:8000/v1/models | python3 -m json.tool
 curl -s http://localhost:8001/v1/models | python3 -m json.tool
 curl -s http://localhost:8002/v1/models | python3 -m json.tool
 
-# Benchmark tok/s
-bash ~/repos/dev-private-spark-inference/scripts/benchmark.sh 8000
-bash ~/repos/dev-private-spark-inference/scripts/benchmark.sh 8001
-bash ~/repos/dev-private-spark-inference/scripts/benchmark.sh 8002
+# Benchmark tok/s — interactive (picks from running models)
+bash ~/repos/spark-inference/scripts/benchmark.sh
+
+# Benchmark a specific port directly
+bash ~/repos/spark-inference/scripts/benchmark.sh 8000
 
 # Quick test
 curl -s http://localhost:8000/v1/chat/completions \
@@ -298,13 +350,12 @@ journalctl --user -u ironclaw -f
 # Last 50 lines
 journalctl --user -u ironclaw -n 50 --no-pager
 
-# Check current model
-ironclaw models status
+# Switch model interactively (shows all LiteLLM models, marks current)
+bash ~/repos/spark-inference/ironclaw/setup.sh model
 
-# Switch model
+# Or switch directly
 ironclaw models set nemotron-nano
 ironclaw models set qwen36
-ironclaw models set deepseek-r1
 
 # Check Telegram pairing
 ironclaw pairing list
@@ -375,10 +426,10 @@ curl -s http://127.0.0.1:4000/v1/chat/completions \
 sudo systemctl status postgresql
 
 # Connect to IronClaw DB
-psql "postgres://victorgil:ironclaw@localhost:5432/ironclaw?sslmode=disable"
+psql "postgres://user:passwd@localhost:5432/ironclaw?sslmode=disable"
 
 # Check IronClaw settings
-psql "postgres://victorgil:ironclaw@localhost:5432/ironclaw?sslmode=disable" \
+psql "postgres://user:passwd@localhost:5432/ironclaw?sslmode=disable" \
   -c "SELECT key, value FROM settings ORDER BY key;"
 ```
 

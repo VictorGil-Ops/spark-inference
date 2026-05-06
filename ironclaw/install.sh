@@ -3,14 +3,48 @@ set -e
 
 echo "=== IronClaw Install for DGX Spark ==="
 
-DB_USER="ironclaw_user"
-DB_PASS="ironclaw"
-DB_NAME="ironclaw"
+REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+LITELLM_CONFIG="$REPO_DIR/ironclaw/litellm/litellm_config.yaml"
+RECIPES_DIR="$REPO_DIR/recipes"
+
 TELEGRAM_TOKEN="${1:-}"
 TELEGRAM_USER_ID="${2:-}"
+DB_USER="${3:-ironclaw_user}"
+DB_PASS="${4:-ironclaw}"
+DB_NAME="ironclaw"
+
+# Default model: first model_name in litellm_config, fallback to arg 5
+_first_litellm_model=$(python3 -c "
+import re, sys
+try:
+    m = re.search(r'model_name:\s*(\S+)', open('$LITELLM_CONFIG').read())
+    print(m.group(1) if m else '')
+except: print('')
+" 2>/dev/null)
+DEFAULT_MODEL="${5:-${_first_litellm_model}}"
+
+# HF model ID: read from recipe whose port matches the litellm api_base for DEFAULT_MODEL
+_hf_model=$(python3 -c "
+import re, os, sys
+model_name = sys.argv[1]
+try:
+    raw = open('$LITELLM_CONFIG').read()
+    block = re.search(r'model_name:\s*' + re.escape(model_name) + r'.*?api_base:\s*(\S+)', raw, re.DOTALL)
+    if not block: sys.exit(0)
+    port = re.search(r':(\d+)', block.group(1)).group(1)
+    for f in os.listdir('$RECIPES_DIR'):
+        if not f.endswith('.yaml'): continue
+        r = open(os.path.join('$RECIPES_DIR', f)).read()
+        if re.search(r'port:\s*' + port, r):
+            m = re.search(r'^model:\s*(.+)', r, re.MULTILINE)
+            if m: print(m.group(1).strip()); sys.exit(0)
+except: pass
+" "$DEFAULT_MODEL" 2>/dev/null)
+HF_MODEL="${6:-${_hf_model}}"
 
 if [ -z "$TELEGRAM_TOKEN" ] || [ -z "$TELEGRAM_USER_ID" ]; then
-    echo "Usage: ./install.sh <telegram_bot_token> <telegram_user_id>"
+    echo "Usage: ./install.sh <telegram_bot_token> <telegram_user_id> [db_user] [db_pass] [default_model] [hf_model]"
+    echo "       Or run: ./setup.sh"
     exit 1
 fi
 
@@ -61,9 +95,9 @@ DATABASE_BACKEND=postgres
 SECRETS_MASTER_KEY=${SECRETS_KEY}
 TELEGRAM_BOT_TOKEN=${TELEGRAM_TOKEN}
 LLM_BACKEND=openai_compatible
-LLM_BASE_URL=http://127.0.0.1:8000/v1
+LLM_BASE_URL=http://127.0.0.1:4000/v1
 LLM_API_KEY=sk-no-key
-LLM_MODEL=nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4
+LLM_MODEL=${HF_MODEL}
 ONBOARD_COMPLETED=true
 CLI_MODE=plain
 EOF
@@ -81,8 +115,9 @@ DB_URL="postgres://${DB_USER}:${DB_PASS}@localhost:5432/${DB_NAME}?sslmode=disab
 psql "$DB_URL" << SQLEOF
 INSERT INTO settings (user_id, key, value) VALUES
   ('default', 'llm_backend',              '"openai_compatible"'),
-  ('default', 'llm_base_url',             '"http://127.0.0.1:8000/v1"'),
-  ('default', 'llm_model',                '"nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4"'),
+  ('default', 'llm_base_url',             '"http://127.0.0.1:4000/v1"'),
+  ('default', 'llm_model',                '"${HF_MODEL}"'),
+  ('default', 'selected_model',           '"${DEFAULT_MODEL}"'),
   ('default', 'channels.cli_enabled',     'false'),
   ('default', 'channels.cli_mode',        '"plain"'),
   ('default', 'channels.wasm_channels',   '["telegram"]'),

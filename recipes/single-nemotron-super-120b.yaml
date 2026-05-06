@@ -1,7 +1,7 @@
 # Recipe: Nemotron-3-Super-120B NVFP4 — SINGLE POWERFUL MODE
 # Use when maximum quality is needed with a single model
 # REQUIRES: stop other containers before starting
-# RAM: ~87GB | tok/s: ~17-20 | Contexto: 262k
+# Memory: ~87GB | tok/s: ~17-20
 recipe_version: "1"
 name: Nemotron-3-Super-120B-NVFP4
 description: |
@@ -25,7 +25,7 @@ env:
   VLLM_USE_FLASHINFER_MOE_FP4: 0
 
 defaults:
-  port: 8000
+  port: 8100
   host: 0.0.0.0
   tensor_parallel: 1
   gpu_memory_utilization: 0.90

@@ -4,21 +4,10 @@ After=network.target
 
 [Service]
 Type=simple
-Environment="CLI_ENABLED=false"
-Environment="CLI_MODE=plain"
-Environment="DATABASE_URL=postgres://victorgil:ironclaw@localhost:5432/ironclaw?sslmode=disable"
-Environment="DATABASE_BACKEND=postgres"
-Environment="SECRETS_MASTER_KEY=f5eaef03abdd30f8a093b29f0e336cddc712d3d807d7bed972b74228b6ddf62a"
-Environment="TELEGRAM_BOT_TOKEN=8656366708:AAHi0c2lrvE9uvZnt0I8iFBbfXhdNGfLx7M"
-Environment="LLM_BACKEND=openai_compatible"
-Environment="LLM_BASE_URL=http://127.0.0.1:8000/v1"
-Environment="LLM_API_KEY=sk-no-key"
-Environment="LLM_MODEL=nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4"
-Environment="ONBOARD_COMPLETED=true"
-Environment="RUST_LOG=ironclaw=debug,warn"
-ExecStart="/home/victor-gil/.cargo/bin/ironclaw" run --no-onboard
+EnvironmentFile=%h/.ironclaw/.env
+ExecStart=%h/.cargo/bin/ironclaw run --no-onboard
 Restart=always
-RestartSec=3
+RestartSec=5
 
 [Install]
 WantedBy=default.target

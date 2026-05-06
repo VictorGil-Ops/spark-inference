@@ -1,0 +1,34 @@
+# Recipe: Foundation-Sec-8B-Instruct — Cisco Foundation AI
+# Cybersecurity specialist: CVE analysis, MITRE ATT&CK, SOC triage, red team
+# Benchmarks: CTI-RCM 0.692 (+24% vs Llama base), HarmBench 91.98%
+# Architecture: Llama-3.1-8B — standard Transformer, FlashInfer compatible
+# Memory: ~35GB | tok/s: ~14
+recipe_version: "1"
+name: Foundation-Sec-8B-Instruct
+description: Cisco Foundation AI cybersecurity model — CVE/CWE/MITRE ATT&CK, SOC triage, red team (port 8002)
+
+model: fdtn-ai/Foundation-Sec-8B-Instruct
+container: vllm-node
+solo_only: true
+
+defaults:
+  port: 8003
+  host: 0.0.0.0
+  tensor_parallel: 1
+  gpu_memory_utilization: 0.25
+  max_model_len: 32768
+  max_num_seqs: 8
+
+command: |
+  vllm serve fdtn-ai/Foundation-Sec-8B-Instruct \
+    --host {host} \
+    --port {port} \
+    --max-model-len {max_model_len} \
+    --gpu-memory-utilization {gpu_memory_utilization} \
+    --max-num-seqs {max_num_seqs} \
+    --enforce-eager \
+    --kv-cache-dtype fp8 \
+    --load-format fastsafetensors \
+    --attention-backend flashinfer \
+    --enable-prefix-caching \
+    --trust-remote-code

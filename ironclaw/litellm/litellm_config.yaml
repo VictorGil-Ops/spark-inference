@@ -2,6 +2,13 @@
 # Unifies all vLLM models under a single endpoint (port 4000)
 # IronClaw points to http://127.0.0.1:4000/v1
 
+litellm_settings:
+  drop_params: true
+  request_timeout: 300
+
+general_settings:
+  port: 4000
+
 model_list:
   - model_name: nemotron-nano
     litellm_params:
@@ -15,15 +22,26 @@ model_list:
       api_base: http://127.0.0.1:8001/v1
       api_key: sk-no-key
 
-  - model_name: deepseek-r1
+  - model_name: foundation-sec
     litellm_params:
-      model: openai/context-labs/deepseek-r1-0528-FP8
+      model: openai/fdtn-ai/Foundation-Sec-8B-Instruct
       api_base: http://127.0.0.1:8002/v1
       api_key: sk-no-key
 
-litellm_settings:
-  drop_params: true
-  request_timeout: 300
+  - model_name: primus
+    litellm_params:
+      model: openai/trendmicro-ailab/Llama-Primus-Reasoning
+      api_base: http://127.0.0.1:8002/v1
+      api_key: sk-no-key
 
-general_settings:
-  port: 4000
+  - model_name: nemotron-super
+    litellm_params:
+      model: openai/nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4
+      api_base: http://127.0.0.1:8100/v1
+      api_key: sk-no-key
+
+  - model_name: nemotron-nano-w4
+    litellm_params:
+      model: openai/cybermotaz/nemotron3-nano-nvfp4-w4a16
+      api_base: http://127.0.0.1:8004/v1
+      api_key: sk-no-key
