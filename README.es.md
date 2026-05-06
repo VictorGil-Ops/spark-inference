@@ -133,17 +133,20 @@ Nemotron-Nano Qwen3.6   Llama-primus
 
 ### Enrutamiento de modelos
 
-| Nombre modelo | Puerto | RAM | Mejor para |
-|---------------|--------|-----|------------|
-| `nemotron-nano` | 8000 | ~32GB | Respuestas rápidas, decisiones de routing |
-| `qwen36` | 8001 | ~45GB | Generación de código, visión, agentes complejos |
-| `llama-primus` | 8002 | ~35GB | reasoning, pentest, OSINT |
+| Modelo | Formato | Puerto | tok/s | RAM | Modo | Rol |
+|--------|---------|--------|-------|-----|------|-----|
+| Nemotron-3-Nano-30B NVFP4 | NVFP4 | 8000 | 41.5 / 58.6* | ~32GB | Eager | Orquestador |
+| Qwen3.6-35B-A3B | FP8 | 8001 | 28.6 | ~45GB | Eager | Código + Visión |
+| Llama-Primus-Reasoning 8B | BF16 | 8002 | 14.4 | ~35GB | Eager | Pentest + Reasoning |
+| Foundation-Sec-8B-Instruct | BF16 | 8002 | 14.5 | ~35GB | Eager | CVE / MITRE / SOC |
+| Nemotron-3-Nano-30B W4A16 | INT4 | 8004 | ~42 | ~18GB | Eager | Orquestador bajo RAM |
+| Nemotron-3-Super-120B | NVFP4 | 8100 | ~17-20 | ~87GB | CUDA graphs | Modo Single Powerful |
 
-Cambiar modelo manualmente:
-```bash
-ironclaw models set qwen36
-ironclaw models set nemotron-nano
-```
+\* 58.6 tok/s con CUDA graphs (modelo único). Eager obligatorio con 3+ modelos simultáneos (~116GB total).
+
+Datos completos de benchmark: [docs/benchmarks.md](docs/benchmarks.md)
+
+Cambiar modelo desde el panel de control: `./spark.sh → [5] IronClaw Setup → [2] Change default model`
 
 ---
 
