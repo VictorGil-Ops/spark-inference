@@ -4,7 +4,7 @@ recipe_version: "1"
 name: DeepSeek-R1-32B-FP8
 description: vLLM serving DeepSeek-R1-0528-FP8 — reasoning + pentest + OSINT (port 8002)
 
-model: deepseek-ai/DeepSeek-R1-0528-FP8
+model: context-labs/deepseek-r1-0528-FP8
 container: vllm-node
 solo_only: true
 defaults:
@@ -15,7 +15,7 @@ defaults:
   max_model_len: 32768
   max_num_seqs: 4
 command: |
-  vllm serve deepseek-ai/DeepSeek-R1-0528-FP8 \
+  vllm serve context-labs/deepseek-r1-0528-FP8 \
     --host {host} \
     --port {port} \
     --max-model-len {max_model_len} \

@@ -71,6 +71,26 @@ cd ~/repos/dev-private-spark-inference
 ./scripts/benchmark.sh 8000
 ```
 
+`run.sh` también funciona en modo interactivo — ejecútalo sin argumentos para elegir de un menú con todas las recetas disponibles, RAM estimada, tok/s, longitud de contexto y `●` junto a los modelos que ya están corriendo:
+
+```
+./scripts/run.sh
+
+=== DGX Spark — Model Launcher ===
+Memory: 57GB used / 122GB total  (65GB free)
+
+  #       Recipe                              Port     RAM   tok/s    ctx
+  ---  --  ----------------------------------  -----  -----  ------  -----
+  1    ●   deepseek-r1-32b-fp8                 8002     25GB   20-25    32k
+  2    ●   nemotron-3-nano-nvfp4               8000     32GB   50-58    32k
+  3        nemotron3-nano-nvfp4-w4a16          8000     18GB      42    32k
+  4    ●   qwen3.6-35b-fp8                     8001     45GB   28-30    32k
+  5        single-nemotron-super-120b          8000     87GB   17-20   128k ⚠
+  6        single-qwen3-235b-int4              8000    115GB   15-18    32k ⚠
+
+Select model (1-6):
+```
+
 ---
 
 ## Arquitectura (Modo Multi-Modelo)
@@ -187,7 +207,8 @@ curl http://localhost:8000/health
 | Modelo | Modo | tok/s | RAM |
 |--------|------|-------|-----|
 | Nemotron-3-Nano NVFP4 | CUDA graphs | **58.6** | ~32GB |
-| Nemotron-3-Nano NVFP4 | Eager | 10.9 | ~32GB |
+| Nemotron-3-Nano NVFP4 | Eager | ~42 | ~18GB |
+| Qwen3.6-35B-A3B FP8 | CUDA graphs | **33.9** | ~45GB |
 
 ---
 
