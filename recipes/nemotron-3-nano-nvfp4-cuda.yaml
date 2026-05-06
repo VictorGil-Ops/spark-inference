@@ -1,0 +1,39 @@
+# Recipe: Nemotron-3-Nano-NVFP4 — CUDA graphs (single/dual model mode)
+# Use when running 1 or 2 models simultaneously (not 3)
+# tok/s: ~58 | RAM: ~32GB | CUDA graphs: enabled
+recipe_version: "1"
+name: Nemotron-3-Nano-NVFP4-CUDA
+description: Nemotron-3-Nano NVFP4 with CUDA graphs — max throughput, single/dual model mode (port 8000)
+
+model: nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4
+container: vllm-node
+solo_only: true
+
+mods:
+  - mods/nemotron-nano
+
+defaults:
+  port: 8000
+  host: 0.0.0.0
+  tensor_parallel: 1
+  gpu_memory_utilization: 0.25
+  max_model_len: 32768
+  max_num_seqs: 256
+
+command: |
+  vllm serve nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4 \
+    --host {host} \
+    --port {port} \
+    --max-model-len {max_model_len} \
+    --gpu-memory-utilization {gpu_memory_utilization} \
+    --max-num-seqs {max_num_seqs} \
+    --moe-backend cutlass \
+    --kv-cache-dtype fp8 \
+    --enable-prefix-caching \
+    --load-format fastsafetensors \
+    --trust-remote-code \
+    --enable-auto-tool-choice \
+    --tool-call-parser qwen3_coder \
+    --reasoning-parser-plugin nano_v3_reasoning_parser.py \
+    --reasoning-parser nano_v3 \
+    --compilation-config '{{"cudagraph_capture_sizes":[1,2,4,8,16,32,64,128,256]}}'
