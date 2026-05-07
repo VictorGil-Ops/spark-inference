@@ -73,6 +73,18 @@ else
     exit 1
 fi
 
+# ── Step 3b: Postgres SSL check ──────────────────────────────────────────────
+echo "--- Checking PostgreSQL SSL ---"
+PG_SSL=$(psql "$DB_URL" -tAc "SHOW ssl;" 2>/dev/null | tr -d ' ')
+if [ "$PG_SSL" = "on" ]; then
+    info "SSL is on — ironclaw's driver can't handle self-signed certs, disabling"
+    psql "$DB_URL" -c "ALTER SYSTEM SET ssl = off;" > /dev/null
+    psql "$DB_URL" -c "SELECT pg_reload_conf();" > /dev/null
+    ok "SSL disabled (pg_reload_conf applied)"
+else
+    ok "SSL off — OK"
+fi
+
 # ── Step 4: Verify LiteLLM proxy ─────────────────────────────────────────────
 echo "--- Checking LiteLLM proxy ---"
 if curl -sf http://127.0.0.1:4000/v1/models \
@@ -176,6 +188,47 @@ else
          ON CONFLICT (user_id, key) DO UPDATE SET value = '[\"telegram\"]';" > /dev/null
     ok "activated_channels fixed"
     NEEDS_RESTART=1
+fi
+
+# ── Step 8b: wasm_channels table — Telegram must be registered ───────────────
+echo "--- Sanity check: wasm_channels table ---"
+WASM_COUNT=$(psql "$DB_URL" -tAc \
+    "SELECT count(*) FROM wasm_channels WHERE name='telegram' AND status='active';" 2>/dev/null || echo 0)
+if [ "$WASM_COUNT" -eq 0 ]; then
+    fail "telegram not in wasm_channels table — registering"
+    WASM_FILE="$HOME/.ironclaw/channels/telegram.wasm"
+    CAPS_FILE="$HOME/.ironclaw/channels/telegram.capabilities.json"
+    if [ -f "$WASM_FILE" ] && [ -f "$CAPS_FILE" ]; then
+        python3 - "$DB_URL" "$WASM_FILE" "$CAPS_FILE" << 'PYEOF'
+import sys, json, hashlib, uuid, subprocess
+
+db_url, wasm_path, caps_path = sys.argv[1:]
+binary = open(wasm_path, 'rb').read()
+caps   = open(caps_path).read()
+d      = json.loads(caps)
+h      = hashlib.sha256(binary).hexdigest()
+
+sql = f"""
+INSERT INTO wasm_channels (id,user_id,name,version,wit_version,description,wasm_binary,binary_hash,capabilities_json,status)
+VALUES ('{uuid.uuid4()}','default','telegram','{d["version"]}','{d["wit_version"]}',
+        '{d["description"].replace("'","''")}',
+        decode('{binary.hex()}','hex'), decode('{h}','hex'),
+        $c${caps}$c$,'active')
+ON CONFLICT (user_id, name) DO UPDATE SET
+    version=EXCLUDED.version, wasm_binary=EXCLUDED.wasm_binary,
+    binary_hash=EXCLUDED.binary_hash, capabilities_json=EXCLUDED.capabilities_json,
+    status='active', updated_at=now();
+"""
+subprocess.run(['psql', db_url, '-c', sql], check=True, capture_output=True)
+print("  registered telegram in wasm_channels")
+PYEOF
+        ok "telegram registered in wasm_channels"
+        NEEDS_RESTART=1
+    else
+        fail "telegram.wasm not found — run: ironclaw registry install telegram"
+    fi
+else
+    ok "telegram in wasm_channels — OK"
 fi
 
 # ── Step 9: LLM model name vs LiteLLM sanity check ───────────────────────────
