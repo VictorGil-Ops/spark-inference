@@ -162,6 +162,24 @@ else
     ok "idle connections OK ($IDLE)"
 fi
 
+# Only Telegram active — remove Slack from wasm_channels
+psql "$DB_URL" -c \
+    "UPDATE settings SET value = '[\"telegram\"]'
+     WHERE key = 'channels.wasm_channels';" > /dev/null 2>&1 || true
+ok "channels.wasm_channels = [telegram]"
+
+# Gateway port 3002 — avoid conflicts with Open WebUI and other services on 3000/3001
+psql "$DB_URL" -c \
+    "INSERT INTO settings (user_id, key, value)
+     VALUES ('default', 'channels.gateway_port', '3002')
+     ON CONFLICT (user_id, key) DO UPDATE SET value = '3002';" > /dev/null 2>&1 || true
+ok "channels.gateway_port = 3002"
+
+# Remove channels.cli_mode from DB — prevents CLI_MODE warning at startup
+psql "$DB_URL" -c \
+    "DELETE FROM settings WHERE key = 'channels.cli_mode';" > /dev/null 2>&1 || true
+ok "channels.cli_mode removed"
+
 # ── Step 7: Start service ─────────────────────────────────────────────────────
 echo "--- Starting IronClaw ---"
 systemctl --user start ironclaw
