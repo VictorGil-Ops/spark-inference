@@ -79,7 +79,7 @@ print_status() {
     # Open WebUI
     if docker inspect open-webui --format '{{.State.Running}}' 2>/dev/null | grep -q true; then
         local port
-        port=$(grep '^PORT=' "$HOME/.ironclaw/webui.conf" 2>/dev/null | cut -d= -f2)
+        port=$(docker inspect open-webui --format '{{(index (index .HostConfig.PortBindings "8080/tcp") 0).HostPort}}' 2>/dev/null)
         port=${port:-3000}
         printf "  ${BOLD}WebUI${RESET}     ${GREEN}running${RESET}  → http://localhost:%s\n" "$port"
     else
