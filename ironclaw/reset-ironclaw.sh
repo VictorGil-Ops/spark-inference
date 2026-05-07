@@ -78,9 +78,15 @@ echo "--- Checking PostgreSQL SSL ---"
 PG_SSL=$(psql "$DB_URL" -tAc "SHOW ssl;" 2>/dev/null | tr -d ' ')
 if [ "$PG_SSL" = "on" ]; then
     info "SSL is on — ironclaw's driver can't handle self-signed certs, disabling"
-    psql "$DB_URL" -c "ALTER SYSTEM SET ssl = off;" > /dev/null
-    psql "$DB_URL" -c "SELECT pg_reload_conf();" > /dev/null
-    ok "SSL disabled (pg_reload_conf applied)"
+    # ALTER SYSTEM requires superuser — use the postgres unix user via sudo
+    if sudo -n -u postgres psql -c "ALTER SYSTEM SET ssl = off; SELECT pg_reload_conf();" > /dev/null 2>&1; then
+        ok "SSL disabled via sudo postgres"
+    else
+        fail "could not disable SSL (need sudo access to postgres unix user)"
+        echo "  Run manually:  sudo -u postgres psql -c \"ALTER SYSTEM SET ssl = off;\""
+        echo "  Then:          sudo -u postgres psql -c \"SELECT pg_reload_conf();\""
+        exit 1
+    fi
 else
     ok "SSL off — OK"
 fi
