@@ -5,7 +5,8 @@
 #        ./scripts/run.sh nemotron-3-nano-nvfp4 -d
 
 SPARK_VLLM_DIR="${SPARK_VLLM_DIR:-$HOME/repos/spark-vllm-docker}"
-RECIPES_DIR="$(cd "$(dirname "$0")/.." && pwd)/recipes"
+REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+RECIPES_DIR="$REPO_DIR/recipes"
 HF_CACHE="${HF_HOME:-$HOME/.cache/huggingface}/hub"
 
 # ── Map recipe name → Docker container name ───────────────────────────────────
@@ -65,12 +66,20 @@ print('yes' if '--enforce-eager' in raw else 'no')
     local extra=()
     for arg in "$@"; do [[ "$arg" != "-d" ]] && extra+=("$arg"); done
 
+    # Rewrite relative mod paths (mods/foo) to absolute paths in our repo so
+    # launch-cluster.sh finds them instead of looking inside spark-vllm-docker/
+    local tmp_recipe
+    tmp_recipe=$(mktemp --suffix=.yaml)
+    sed "s|^\( *- \)\(mods/\)|\1${REPO_DIR}/\2|g" \
+        "${RECIPES_DIR}/${recipe}.yaml" > "$tmp_recipe"
+
     cd "$SPARK_VLLM_DIR" && \
-        ./run-recipe.sh "${RECIPES_DIR}/${recipe}.yaml" \
+        ./run-recipe.sh "$tmp_recipe" \
         --name "$cname" \
         --solo \
         -d \
         "${extra[@]}"
+    rm -f "$tmp_recipe"
 
     # Stream logs in background, stop when health endpoint is ready
     echo ""
