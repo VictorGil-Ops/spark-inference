@@ -2,6 +2,18 @@
 
 This file is excluded from the production sync via `.prodignore`.
 
+## Huging Face
+
+```bash
+pip install -U "huggingface_hub[hf_xet]"
+ 
+# Log in once; the token is cached at ~/.cache/huggingface/token (check user owner)
+hf auth login
+ 
+# Sanity check: should print your username and orgs
+hf auth whoami
+```
+
 ## Repo naming convention
 
 This repo follows the `dev-private-<name>` pattern:
