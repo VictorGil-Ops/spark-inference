@@ -62,3 +62,21 @@ ironclaw pairing approve telegram CODE
 |-------|--------------|
 | Simple greeting | ~5s |
 | Complex explanation (2 phases) | ~14s |
+
+
+## Troubelshooting
+Fix limit context
+
+`Error: LLM error: Context length exceeded: 32768 tokens used, 400 allowed`
+
+```bash
+psql "postgres://user:passwd@localhost:5432/ironclaw?sslmode=disable" << 'SQL'
+UPDATE settings SET value = '28000' WHERE key = 'skills.max_context_tokens';
+UPDATE settings SET value = '28000' WHERE key = 'routines.max_lightweight_tokens';
+UPDATE settings SET value = '100000' WHERE key = 'safety.max_output_length';
+SELECT key, value FROM settings WHERE key LIKE '%token%' OR key LIKE '%context%' OR key LIKE '%output%';
+SQL
+```
+```bash
+systemctl --user restart ironclaw
+```
