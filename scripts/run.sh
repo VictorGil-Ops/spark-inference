@@ -322,51 +322,55 @@ echo "  [h <num>]  Download from HuggingFace             (e.g. h5)"
 echo "  [d <num>]  Delete from local cache               (e.g. d3)"
 echo "  [q]        Quit"
 echo ""
-read -rp "Select model (1-${COUNT}): " sel
 
-if [[ "$sel" == "q" || "$sel" == "Q" ]]; then
-    echo "Bye."
-    exit 0
-fi
+while true; do
+    read -rp "Select model (1-${COUNT}): " sel
 
-# Unload: x<num>
-if [[ "$sel" =~ ^[xX][[:space:]]*([0-9]+)$ ]]; then
-    idx="${BASH_REMATCH[1]}"
-    if [ "$idx" -lt 1 ] || [ "$idx" -gt "$COUNT" ]; then
-        echo "Invalid selection."
-        exit 1
+    if [[ "$sel" == "q" || "$sel" == "Q" ]]; then
+        echo "Bye."
+        exit 0
     fi
-    unload_model "${SLUGS[$((idx-1))]}"
-    exit $?
-fi
 
-# Download from HF: h<num>
-if [[ "$sel" =~ ^[hH][[:space:]]*([0-9]+)$ ]]; then
-    idx="${BASH_REMATCH[1]}"
-    if [ "$idx" -lt 1 ] || [ "$idx" -gt "$COUNT" ]; then
-        echo "Invalid selection."
-        exit 1
+    # Unload: x<num>
+    if [[ "$sel" =~ ^[xX][[:space:]]*([0-9]+)$ ]]; then
+        idx="${BASH_REMATCH[1]}"
+        if [ "$idx" -lt 1 ] || [ "$idx" -gt "$COUNT" ]; then
+            echo "  Invalid selection."; continue
+        fi
+        unload_model "${SLUGS[$((idx-1))]}"
+        exit $?
     fi
-    download_hf "${MODEL_IDS[$((idx-1))]}"
-    exit $?
-fi
 
-# Delete from local cache: d<num>
-if [[ "$sel" =~ ^[dD][[:space:]]*([0-9]+)$ ]]; then
-    idx="${BASH_REMATCH[1]}"
-    if [ "$idx" -lt 1 ] || [ "$idx" -gt "$COUNT" ]; then
-        echo "Invalid selection."
-        exit 1
+    # Download from HF: h<num>
+    if [[ "$sel" =~ ^[hH][[:space:]]*([0-9]+)$ ]]; then
+        idx="${BASH_REMATCH[1]}"
+        if [ "$idx" -lt 1 ] || [ "$idx" -gt "$COUNT" ]; then
+            echo "  Invalid selection."; continue
+        fi
+        download_hf "${MODEL_IDS[$((idx-1))]}"
+        exit $?
     fi
-    delete_cache "${MODEL_IDS[$((idx-1))]}"
-    exit $?
-fi
 
-if ! [[ "$sel" =~ ^[0-9]+$ ]] || [ "$sel" -lt 1 ] || [ "$sel" -gt "$COUNT" ]; then
-    echo "Invalid selection."
-    exit 1
-fi
+    # Delete from local cache: d<num>
+    if [[ "$sel" =~ ^[dD][[:space:]]*([0-9]+)$ ]]; then
+        idx="${BASH_REMATCH[1]}"
+        if [ "$idx" -lt 1 ] || [ "$idx" -gt "$COUNT" ]; then
+            echo "  Invalid selection."; continue
+        fi
+        delete_cache "${MODEL_IDS[$((idx-1))]}"
+        exit $?
+    fi
 
-RECIPE="${SLUGS[$((sel - 1))]}"
-echo ""
-launch "$RECIPE" "$@"
+    # Launch model: <num>
+    if ! [[ "$sel" =~ ^[0-9]+$ ]] || [ "$sel" -lt 1 ] || [ "$sel" -gt "$COUNT" ]; then
+        echo "  Invalid selection."; continue
+    fi
+
+    RECIPE="${SLUGS[$((sel - 1))]}"
+    read -rp "  Launch ${RECIPE}? [y/N]: " confirm
+    [[ "$confirm" =~ ^[yY]$ ]] || continue
+
+    echo ""
+    launch "$RECIPE" "$@"
+    break
+done
