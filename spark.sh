@@ -54,8 +54,15 @@ print_status() {
     avail=$(awk '/MemAvailable/{printf "%.0f", $2/1048576}' /proc/meminfo)
     used=$(( total - avail ))
 
+    local hf_cache disk_total disk_used disk_free
+    hf_cache="${HF_HOME:-$HOME/.cache/huggingface}/hub"
+    read -r disk_total disk_used disk_free < <(
+        df "$hf_cache" 2>/dev/null | awk 'NR==2{printf "%.0f %.0f %.0f\n", $2/1048576, $3/1048576, $4/1048576}'
+    )
+
     echo ""
     printf "  ${BOLD}System${RESET}    %sGB / %sGB RAM used  (%sGB free)\n" "$used" "$total" "$avail"
+    printf "  ${BOLD}Storage${RESET}   %sGB / %sGB used  (%sGB free)\n" "$disk_used" "$disk_total" "$disk_free"
 
     # Running vLLM containers
     local vllm_running
