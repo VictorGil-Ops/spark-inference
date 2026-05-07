@@ -119,6 +119,13 @@ run_benchmark() {
 
     tokens=$(echo "$response" | python3 -c "import sys,json; print(json.load(sys.stdin)['usage']['completion_tokens'])" 2>/dev/null)
     elapsed=$(echo "scale=2; ($end - $start) / 1000000000" | bc)
+
+    if [ -z "$tokens" ] || [ "$tokens" -eq 0 ] 2>/dev/null; then
+        echo "ERROR: Could not parse response. Raw output:"
+        echo "$response" | head -5
+        exit 1
+    fi
+
     toks_per_sec=$(echo "scale=1; $tokens / $elapsed" | bc)
 
     echo "Tokens generated : ${tokens}"
