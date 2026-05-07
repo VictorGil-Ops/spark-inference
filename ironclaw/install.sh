@@ -55,6 +55,9 @@ sudo systemctl start postgresql
 sudo systemctl enable postgresql
 sudo -u postgres psql -c "CREATE USER ${DB_USER} WITH PASSWORD '${DB_PASS}';" 2>/dev/null || true
 sudo -u postgres createdb ${DB_NAME} -O ${DB_USER} 2>/dev/null || true
+# Disable SSL — ironclaw's Rust driver doesn't handle self-signed certs
+sudo -u postgres psql -c "ALTER SYSTEM SET ssl = off;" 2>/dev/null || true
+sudo -u postgres psql -c "SELECT pg_reload_conf();" 2>/dev/null || true
 
 # pgvector
 if [ ! -d /tmp/pgvector ]; then
@@ -83,10 +86,13 @@ cargo install --path . --bin ironclaw
 echo "--- Creating .env ---"
 mkdir -p ~/.ironclaw
 SECRETS_KEY="$(openssl rand -hex 32)"
-# If .env already exists, reuse the existing key
+GATEWAY_TOKEN="$(openssl rand -hex 32)"
+# If .env already exists, reuse stable secrets
 if [ -f ~/.ironclaw/.env ]; then
-    EXISTING=$(grep '^SECRETS_MASTER_KEY=' ~/.ironclaw/.env | cut -d= -f2)
-    [ -n "$EXISTING" ] && SECRETS_KEY="$EXISTING"
+    EXISTING_KEY=$(grep '^SECRETS_MASTER_KEY=' ~/.ironclaw/.env | cut -d= -f2)
+    EXISTING_GW=$(grep '^GATEWAY_AUTH_TOKEN=' ~/.ironclaw/.env | tr -d '"' | cut -d= -f2)
+    [ -n "$EXISTING_KEY" ] && SECRETS_KEY="$EXISTING_KEY"
+    [ -n "$EXISTING_GW" ]  && GATEWAY_TOKEN="$EXISTING_GW"
 fi
 
 cat > ~/.ironclaw/.env << EOF
@@ -100,6 +106,7 @@ LLM_API_KEY=sk-no-key
 LLM_MODEL=${HF_MODEL}
 ONBOARD_COMPLETED=true
 CLI_MODE=plain
+GATEWAY_AUTH_TOKEN=${GATEWAY_TOKEN}
 EOF
 chmod 600 ~/.ironclaw/.env
 
@@ -135,25 +142,7 @@ mkdir -p ~/.ironclaw/channels
 ironclaw registry install telegram 2>/dev/null || \
     echo "Install telegram.wasm manually into ~/.ironclaw/channels/"
 
-# Fix: Enable polling in telegram.capabilities.json
-# (default is False, must be True for IronClaw to connect to Telegram)
-echo "--- Fixing Telegram polling in capabilities.json ---"
-python3 -c "
-import json, os
-path = os.path.expanduser('~/.ironclaw/channels/telegram.capabilities.json')
-if os.path.exists(path):
-    d = json.load(open(path))
-    d['config']['polling_enabled'] = True
-    d['config']['webhook_enabled'] = False
-    json.dump(d, open(path,'w'), indent=2)
-    print('  polling_enabled: True')
-else:
-    print('  WARNING: telegram.capabilities.json not found')
-"
-
-
-# Fix: Enable polling in telegram.capabilities.json
-# (default is False, must be True for IronClaw to connect to Telegram)
+# Enable polling in telegram.capabilities.json (default is False)
 echo "--- Fixing Telegram polling in capabilities.json ---"
 python3 -c "
 import json, os
@@ -191,6 +180,20 @@ EOF
 systemctl --user daemon-reload
 systemctl --user enable ironclaw
 systemctl --user start ironclaw
+
+# Source .env in shell startup so `ironclaw status` works from any terminal
+SHELL_LINE='[ -f "$HOME/.ironclaw/.env" ] && set -a && . "$HOME/.ironclaw/.env" && set +a'
+for RC in ~/.bashrc ~/.profile; do
+    if [ -f "$RC" ] && ! grep -qF 'ironclaw/.env' "$RC"; then
+        # In .bashrc: insert before the interactive guard so it works in all shell types
+        if [ "$RC" = "$HOME/.bashrc" ]; then
+            sed -i '/^# If not running interactively/i '"$SHELL_LINE"'' "$RC" 2>/dev/null || echo "$SHELL_LINE" >> "$RC"
+        else
+            echo "$SHELL_LINE" >> "$RC"
+        fi
+        echo "  Added ironclaw env to $RC"
+    fi
+done
 
 echo ""
 echo "=== IronClaw installed ==="
