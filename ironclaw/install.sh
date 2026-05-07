@@ -135,6 +135,23 @@ mkdir -p ~/.ironclaw/channels
 ironclaw registry install telegram 2>/dev/null || \
     echo "Install telegram.wasm manually into ~/.ironclaw/channels/"
 
+# Fix: Enable polling in telegram.capabilities.json
+# (default is False, must be True for IronClaw to connect to Telegram)
+echo "--- Fixing Telegram polling in capabilities.json ---"
+python3 -c "
+import json, os
+path = os.path.expanduser('~/.ironclaw/channels/telegram.capabilities.json')
+if os.path.exists(path):
+    d = json.load(open(path))
+    d['config']['polling_enabled'] = True
+    d['config']['webhook_enabled'] = False
+    json.dump(d, open(path,'w'), indent=2)
+    print('  polling_enabled: True')
+else:
+    print('  WARNING: telegram.capabilities.json not found')
+"
+
+
 # 8. Systemd service
 echo "--- Installing systemd service ---"
 mkdir -p ~/.config/systemd/user
