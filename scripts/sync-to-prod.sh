@@ -74,20 +74,20 @@ if gh repo view "$PROD_REPO" > /dev/null 2>&1; then
     git remote add origin "https://github.com/${PROD_REPO}.git"
 
     # Check if remote has commits
-    if git ls-remote --heads origin main | grep -q main; then
+    if git ls-remote --heads origin master | grep -q master; then
         echo "  Remote has commits — fetching and rebasing..."
-        git fetch origin main
+        git fetch origin master
         # Use ours strategy — dev is source of truth
-        git rebase origin/main || {
+        git rebase origin/master || {
             echo "  Rebase conflict — using dev version as source of truth"
             git rebase --abort
-            git push origin main --force
+            git push origin master --force
             echo "  Force pushed (dev is source of truth)"
         }
-        git push origin main
+        git push origin master
     else
         echo "  Remote is empty — pushing..."
-        git push origin main
+        git push origin master
     fi
 else
     echo "  Prod repo does not exist — creating..."
