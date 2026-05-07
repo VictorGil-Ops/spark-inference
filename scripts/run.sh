@@ -198,9 +198,14 @@ TOTAL_GB=$(awk '/MemTotal/{printf "%.0f", $2/1048576}' /proc/meminfo)
 AVAIL_GB=$(awk '/MemAvailable/{printf "%.0f", $2/1048576}' /proc/meminfo)
 USED_GB=$((TOTAL_GB - AVAIL_GB))
 
+read -r DISK_TOTAL_GB DISK_USED_GB DISK_FREE_GB < <(
+    df "$HF_CACHE" 2>/dev/null | awk 'NR==2{printf "%.0f %.0f %.0f\n", $2/1048576, $3/1048576, $4/1048576}'
+)
+
 echo "=== DGX Spark — Model Launcher ==="
 echo ""
-echo "Memory: ${USED_GB}GB used / ${TOTAL_GB}GB total  (${AVAIL_GB}GB free)"
+echo "Memory:  ${USED_GB}GB used / ${TOTAL_GB}GB total  (${AVAIL_GB}GB free)"
+echo "Storage: ${DISK_USED_GB}GB used / ${DISK_TOTAL_GB}GB total  (${DISK_FREE_GB}GB free)  [$(df --output=target "$HF_CACHE" 2>/dev/null | tail -1 | tr -d ' ')]"
 echo ""
 echo "  Note: to switch between CUDA graphs / Eager variants of the same model,"
 echo "        stop the container and delete its cached compilation artifacts first (d <num>)."
