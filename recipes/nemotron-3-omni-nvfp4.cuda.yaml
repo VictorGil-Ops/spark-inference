@@ -1,0 +1,37 @@
+# Recipe: Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4
+# Multimodal: Video + Audio + Image + Text
+# Memory: ~XGB | tok/s: ~YY
+# Same model as Omni but without multimodal encoders loaded
+# Memory: ~32GB (vs ~96GB full Omni) | tok/s: ~50-58
+# Use when you don't need vision/audio and want to save RAM
+recipe_version: "1"
+name: Nemotron-3-Nano-Omni-Text-NVFP4
+description: Nemotron-Omni in text-only mode — no video/audio encoders (port 8000)
+
+model: nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4
+container: vllm-node
+solo_only: true
+
+defaults:
+  port: 8000
+  host: 0.0.0.0
+  tensor_parallel: 1
+  gpu_memory_utilization: 0.35
+  max_model_len: 32768
+  max_num_seqs: 8
+
+command: |
+  vllm serve nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4 \
+    --host {host} \
+    --port {port} \
+    --max-model-len {max_model_len} \
+    --max-num-seqs {max_num_seqs} \
+    --gpu-memory-utilization {gpu_memory_utilization} \
+    --trust-remote-code \
+    --kv-cache-dtype fp8 \
+    --load-format fastsafetensors \
+    --attention-backend flashinfer \
+    --enable-prefix-caching \
+    --reasoning-parser nemotron_v3 \
+    --moe-backend flashinfer_cutlass \
+    --limit-mm-per-prompt '{{"video": 0, "image": 0, "audio": 0}}' \
