@@ -132,7 +132,10 @@ INSERT INTO settings (user_id, key, value) VALUES
   ('default', 'telegram_bot_token',       '"${TELEGRAM_TOKEN}"'),
   ('default', 'telegram_allow_from',      '["${TELEGRAM_USER_ID}"]'),
   ('default', 'telegram_polling_enabled', 'true'),
-  ('default', 'activated_channels',       '["telegram"]')
+  ('default', 'activated_channels',       '["telegram"]'),
+  ('default', 'safety.max_output_length',          '100000'),
+  ('default', 'skills.max_context_tokens',          '28000'),
+  ('default', 'routines.max_lightweight_tokens',    '28000')
 ON CONFLICT (user_id, key) DO UPDATE SET value = EXCLUDED.value;
 SQLEOF
 

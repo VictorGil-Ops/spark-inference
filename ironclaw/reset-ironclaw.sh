@@ -180,6 +180,15 @@ psql "$DB_URL" -c \
     "DELETE FROM settings WHERE key = 'channels.cli_mode';" > /dev/null 2>&1 || true
 ok "channels.cli_mode removed"
 
+# Context/output limits — prevent context-length-exceeded on 32K models
+psql "$DB_URL" -c \
+    "INSERT INTO settings (user_id, key, value)
+     VALUES ('default', 'safety.max_output_length',       '100000'),
+            ('default', 'skills.max_context_tokens',       '28000'),
+            ('default', 'routines.max_lightweight_tokens', '28000')
+     ON CONFLICT (user_id, key) DO UPDATE SET value = EXCLUDED.value;" > /dev/null 2>&1 || true
+ok "context limits: skills/routines max_context=28000, max_output_length=100000"
+
 # ── Step 7: Start service ─────────────────────────────────────────────────────
 echo "--- Starting IronClaw ---"
 systemctl --user start ironclaw
