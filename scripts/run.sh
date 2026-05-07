@@ -318,6 +318,7 @@ COUNT=${#SLUGS[@]}
 printf "  \033[32m●\033[0m running   \033[36m✓\033[0m cached locally   ⚠ exceeds free RAM\n"
 echo ""
 echo "  [x <num>]  Unload from memory (stop container)   (e.g. x2)"
+echo "  [l <num>]  Logs (tail -f container logs)         (e.g. l2)"
 echo "  [h <num>]  Download from HuggingFace             (e.g. h5)"
 echo "  [d <num>]  Delete from local cache               (e.g. d3)"
 echo "  [q]        Quit"
@@ -339,6 +340,22 @@ while true; do
         fi
         unload_model "${SLUGS[$((idx-1))]}"
         exit $?
+    fi
+
+    # Logs: l<num>
+    if [[ "$sel" =~ ^[lL][[:space:]]*([0-9]+)$ ]]; then
+        idx="${BASH_REMATCH[1]}"
+        if [ "$idx" -lt 1 ] || [ "$idx" -gt "$COUNT" ]; then
+            echo "  Invalid selection."; continue
+        fi
+        cname=$(container_name "${SLUGS[$((idx-1))]}")
+        if ! docker inspect "$cname" >/dev/null 2>&1; then
+            echo "  ✗ ${cname} is not running"; continue
+        fi
+        echo "  Logs for ${cname} — Ctrl+C to stop"
+        echo ""
+        docker logs -f --tail 50 "$cname" 2>&1
+        continue
     fi
 
     # Download from HF: h<num>
