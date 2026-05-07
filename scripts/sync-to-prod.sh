@@ -65,30 +65,19 @@ while read f; do
     fi
 done
 
+# ── Commit the stripped working tree ─────────────────────────────────────────
+git config user.email "sync@local" && git config user.name "sync-to-prod"
+git add -A
+git diff --cached --quiet || git commit -m "chore: strip dev-private references for production"
+
 # ── Check if prod repo exists on GitHub ──────────────────────────────────────
 echo "--- Checking production repo ---"
 git remote remove origin 2>/dev/null || true
 
 if gh repo view "$PROD_REPO" > /dev/null 2>&1; then
-    echo "  Prod repo exists on GitHub — checking for existing commits..."
+    echo "  Prod repo exists — force-pushing (dev is source of truth)..."
     git remote add origin "https://github.com/${PROD_REPO}.git"
-
-    # Check if remote has commits
-    if git ls-remote --heads origin master | grep -q master; then
-        echo "  Remote has commits — fetching and rebasing..."
-        git fetch origin master
-        # Use ours strategy — dev is source of truth
-        git rebase origin/master || {
-            echo "  Rebase conflict — using dev version as source of truth"
-            git rebase --abort
-            git push origin master --force
-            echo "  Force pushed (dev is source of truth)"
-        }
-        git push origin master
-    else
-        echo "  Remote is empty — pushing..."
-        git push origin master
-    fi
+    git push origin master --force
 else
     echo "  Prod repo does not exist — creating..."
     DESCRIPTION=$(gh repo view "$DEV_REPO" --json description -q .description 2>/dev/null || echo "")
