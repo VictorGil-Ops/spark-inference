@@ -8,9 +8,15 @@ recipe_version: "1"
 name: Nemotron-3-Nano-Omni-Text-NVFP4
 description: Nemotron-Omni in text-only mode — no video/audio encoders (port 8000)
 
-model: nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4
+model: AEON-7/Nemotron-3-Nano-Omni-AEON-Ultimate-Uncensored-NVFP4
 container: vllm-node
 solo_only: true
+
+# VLLM_TEST_FORCE_FP8_MARLIN is only used when forcing the Marlin NVFP4 backend.
+# With the recommended --moe-backend flashinfer_cutlass it has no effect,
+# so this variable is not needed and can be safely removed.
+env:
+  VLLM_TEST_FORCE_FP8_MARLIN: 0   # <-- Not needed for flashinfer_cutlass
 
 defaults:
   port: 8000
@@ -21,7 +27,7 @@ defaults:
   max_num_seqs: 8
 
 command: |
-  vllm serve nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4 \
+  vllm serve AEON-7/Nemotron-3-Nano-Omni-AEON-Ultimate-Uncensored-NVFP4 \
     --host {host} \
     --port {port} \
     --max-model-len {max_model_len} \
@@ -33,5 +39,6 @@ command: |
     --attention-backend flashinfer \
     --enable-prefix-caching \
     --reasoning-parser nemotron_v3 \
+    --chat-template-content-format string \
     --moe-backend flashinfer_cutlass \
-    --limit-mm-per-prompt '{{"video": 0, "image": 0, "audio": 0}}' \
+ 

@@ -1,6 +1,6 @@
 # Recipe: Qwen3.6-35B-A3B-FP8 — CUDA graphs (single/dual model mode)
 # Use when running 1 or 2 models simultaneously (not 3)
-# tok/s: ~35-40 | RAM: ~45GB | CUDA graphs: enabled
+# tok/s: ~53.7 | RAM: ~67GB | CUDA graphs: enabled
 recipe_version: "1"
 name: Qwen3.6-35B-A3B-FP8-CUDA
 description: Qwen3.6-35B FP8 with CUDA graphs — max throughput, single/dual model mode (port 8001)
@@ -13,7 +13,7 @@ defaults:
   port: 8001
   host: 0.0.0.0
   tensor_parallel: 1
-  gpu_memory_utilization: 0.45
+  gpu_memory_utilization: 0.50
   max_model_len: 32768
   max_num_batched_tokens: 8192
   max_num_seqs: 128

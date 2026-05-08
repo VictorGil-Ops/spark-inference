@@ -10,6 +10,12 @@ general_settings:
   port: 4000
 
 model_list:
+  - model_name: nemotron-omni
+    litellm_params:
+      model: openai/nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4
+      api_base: http://127.0.0.1:8000/v1
+      api_key: sk-no-key
+
   - model_name: nemotron-nano
     litellm_params:
       model: openai/nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4

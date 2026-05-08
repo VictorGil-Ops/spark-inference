@@ -1,6 +1,6 @@
 # Recipe: Gemma-4-26B-A4B-NVFP4
 # Multimodal (image). enable-chunked-prefill required — model's max_tokens_per_mm_item (2496) > default max_num_batched_tokens (2048)
-# Memory: ~50GB | tok/s: ~??
+# Memory: ~117GB | tok/s: ~29
 recipe_version: "1"
 name: Gemma-4-26B-A4B-NVFP4
 description: nvidia/Gemma-4-26B-A4B-NVFP4 multimodal (port 8005)
@@ -10,12 +10,12 @@ container: vllm-node
 solo_only: true
 
 defaults:
-  port: 8005
+  port: 8200
   host: 0.0.0.0
   tensor_parallel: 1
   gpu_memory_utilization: 0.90
   max_model_len: 32768
-  max_num_batched_tokens: 4096
+  max_num_batched_tokens: 8192
   max_num_seqs: 128
 
 command: |
@@ -27,7 +27,5 @@ command: |
     --max-num-seqs {max_num_seqs} \
     --gpu-memory-utilization {gpu_memory_utilization} \
     --enable-chunked-prefill \
-    --kv-cache-dtype auto \
-    --limit-mm-per-prompt "image=1" \
-    --attention-backend flashinfer \
+    --attention-backend triton_attn \
     --trust-remote-code

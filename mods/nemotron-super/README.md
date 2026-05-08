@@ -1,4 +1,3 @@
 # mod: nemotron-super
 
-Downloads the custom reasoning parser for Nemotron3-Super from HuggingFace.
-Required to correctly parse the `<think>...</think>` format of the Super model.
+https://huggingface.co/nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4
