@@ -19,17 +19,41 @@ ok()   { printf "  ${GREEN}✓${RESET} %s\n" "$*"; }
 info() { printf "  → %s\n" "$*"; }
 ask()  { printf "${CYAN}%s${RESET} " "$*"; }
 
-# ── Read LiteLLM model names from config ──────────────────────────────────────
+# ── Read LiteLLM model names: check live vLLM ports, fallback to all config ───
 litellm_models() {
     python3 -c "
-import re
+import re, urllib.request
+
 try:
     raw = open('$LITELLM_CONFIG').read()
-    for m in re.findall(r'model_name:\s*(.+)', raw):
-        print(m.strip())
 except FileNotFoundError:
-    pass
-"
+    exit(0)
+
+entries = []
+for model_name, api_base in re.findall(r'model_name:\s*(\S+).*?api_base:\s*(\S+)', raw, re.DOTALL):
+    m = re.search(r':(\d+)', api_base)
+    if m:
+        entries.append((model_name.strip(), m.group(1)))
+
+port_alive = {}
+live = []
+for model_name, port in entries:
+    if port not in port_alive:
+        try:
+            req = urllib.request.Request(
+                f'http://127.0.0.1:{port}/v1/models',
+                headers={'Authorization': 'Bearer sk-no-key'}
+            )
+            urllib.request.urlopen(req, timeout=1).read()
+            port_alive[port] = True
+        except Exception:
+            port_alive[port] = False
+    if port_alive[port]:
+        live.append(model_name)
+
+for m in (live if live else [e[0] for e in entries]):
+    print(m)
+" 2>/dev/null
 }
 
 # ── Read current selected_model from DB ───────────────────────────────────────

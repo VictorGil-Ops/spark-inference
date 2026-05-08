@@ -28,4 +28,6 @@ command: |
     --gpu-memory-utilization {gpu_memory_utilization} \
     --enable-chunked-prefill \
     --attention-backend triton_attn \
-    --trust-remote-code
+    --trust-remote-code \
+    --enable-auto-tool-choice \
+    --tool-call-parser gemma4

@@ -27,6 +27,14 @@ launch() {
     awk '/MemAvailable/{printf "  Available: %.1f GB\n", $2/1048576}' /proc/meminfo
     echo ""
 
+    # Stop the container if already running before relaunching
+    if docker inspect "$cname" --format '{{.State.Running}}' 2>/dev/null | grep -q true; then
+        echo "Stopping running container: ${cname}"
+        docker stop "$cname" >/dev/null
+        echo "  ✓ Stopped"
+        echo ""
+    fi
+
     # Warn if an existing container was launched with a different execution mode
     if docker inspect "$cname" >/dev/null 2>&1; then
         local recipe_eager container_eager

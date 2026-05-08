@@ -51,3 +51,9 @@ model_list:
       model: openai/cybermotaz/nemotron3-nano-nvfp4-w4a16
       api_base: http://127.0.0.1:8004/v1
       api_key: sk-no-key
+
+  - model_name: gemma-4
+    litellm_params:
+      model: openai/nvidia/Gemma-4-26B-A4B-NVFP4
+      api_base: http://127.0.0.1:8200/v1
+      api_key: sk-no-key
