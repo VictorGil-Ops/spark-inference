@@ -1,12 +1,25 @@
 #!/bin/bash
 set -e
 
-REPO_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+LITELLM_HOME="$HOME/.litellm"
+LITELLM_CONFIG="$LITELLM_HOME/litellm_config.yaml"
+
 echo "=== LiteLLM Proxy Install/Update for DGX Spark ==="
 
 # Install or update LiteLLM
 echo "--- Installing/updating LiteLLM ---"
 pip install "litellm[proxy]" --break-system-packages --upgrade
+
+# Create ~/.litellm and seed config on first install
+mkdir -p "$LITELLM_HOME"
+if [ ! -f "$LITELLM_CONFIG" ]; then
+    cp "$SCRIPT_DIR/litellm_config.yaml" "$LITELLM_CONFIG"
+    echo "  → Config installed to $LITELLM_CONFIG"
+else
+    echo "  → Using existing config at $LITELLM_CONFIG"
+    echo "     (edit it directly to add/remove models)"
+fi
 
 # Stop service if running
 echo "--- Stopping existing service (if running) ---"
@@ -22,7 +35,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=${HOME}/.local/bin/litellm --config ${REPO_DIR}/ironclaw/litellm/litellm_config.yaml
+ExecStart=${HOME}/.local/bin/litellm --config ${LITELLM_CONFIG}
 Restart=always
 RestartSec=5
 
@@ -57,11 +70,9 @@ done
 echo ""
 echo "=== LiteLLM installed/updated on port 4000 ==="
 echo ""
-echo "To reconfigure IronClaw:"
-echo "  ironclaw onboard --step provider"
-echo "  URL: http://127.0.0.1:4000/v1"
-echo "  API key: sk-spark-local"
-echo "  Model: nemotron-nano"
+echo "Config: $LITELLM_CONFIG"
+echo "  Add/remove models by editing that file, then:"
+echo "  systemctl --user restart litellm"
 echo ""
 echo "Management commands:"
 echo "  systemctl --user status litellm"

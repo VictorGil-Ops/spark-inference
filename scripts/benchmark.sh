@@ -174,7 +174,11 @@ done
 
 if [ ${#RUNNING[@]} -eq 0 ]; then
     echo "No vLLM models running on ports: ${RECIPE_PORTS}"
-    exit 1
+    echo ""
+    read -rp "  Enter port to probe manually (or q to quit): " manual_port
+    [[ "$manual_port" == "q" || "$manual_port" == "Q" || -z "$manual_port" ]] && echo "Bye." && exit 0
+    run_benchmark "$manual_port"
+    exit $?
 fi
 
 echo "Running models:"

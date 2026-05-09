@@ -73,6 +73,17 @@ print_status() {
         printf "  ${BOLD}Models${RESET}    ${DIM}none running${RESET}\n"
     fi
 
+    # Active embedding model from ~/.ironclaw/config.toml
+    local embed_enabled embed_model embed_provider
+    embed_enabled=$(awk '/^\[embeddings\]/{f=1} f && /^enabled/{print; exit}' "$HOME/.ironclaw/config.toml" 2>/dev/null | grep -o 'true\|false')
+    embed_model=$(awk '/^\[embeddings\]/{f=1} f && /^model/{print; exit}' "$HOME/.ironclaw/config.toml" 2>/dev/null | sed 's/.*= *"\(.*\)"/\1/')
+    embed_provider=$(awk '/^\[embeddings\]/{f=1} f && /^provider/{print; exit}' "$HOME/.ironclaw/config.toml" 2>/dev/null | sed 's/.*= *"\(.*\)"/\1/')
+    if [ "$embed_enabled" = "true" ] && [ -n "$embed_model" ]; then
+        printf "  ${BOLD}Embedding${RESET} ${GREEN}%s${RESET}  ${DIM}(%s)${RESET}\n" "$embed_model" "$embed_provider"
+    else
+        printf "  ${BOLD}Embedding${RESET} ${DIM}disabled${RESET}\n"
+    fi
+
     printf "  ${BOLD}LiteLLM${RESET}   %s\n"   "$(svc_status litellm)"
     printf "  ${BOLD}IronClaw${RESET}  %s\n"   "$(svc_status ironclaw)"
 
@@ -127,7 +138,7 @@ while true; do
         3) bash "$REPO_DIR/scripts/benchmark.sh" ;;
         4) bash "$REPO_DIR/scripts/webui.sh" ;;
         5) bash "$REPO_DIR/ironclaw/setup.sh" ;;
-        6) bash "$REPO_DIR/scripts/reset-ironclaw.sh" ;;
+        6) bash "$REPO_DIR/ironclaw/reset-ironclaw.sh" ;;
         q|Q) echo "  Bye."; break ;;
         *) echo "  Invalid." ;;
     esac

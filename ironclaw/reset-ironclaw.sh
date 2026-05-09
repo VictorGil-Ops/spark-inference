@@ -312,6 +312,19 @@ if [ "${NEEDS_RESTART:-0}" = "1" ]; then
     sleep 3
 fi
 
+# ── Step N: Reimport workspace files into ironclaw memory ────────────────────
+echo "--- Reimporting workspace into ironclaw memory ---"
+for f in IDENTITY.md SOUL.md USER.md AGENTS.md; do
+    src="$HOME/.ironclaw/workspace/$f"
+    if [ -f "$src" ]; then
+        ironclaw memory write "$f" "$(cat "$src")" 2>/dev/null \
+            && ok "imported $f" \
+            || fail "failed to import $f"
+    else
+        fail "$f not found at $src"
+    fi
+done
+
 echo ""
 echo "=== Done ==="
 echo ""
