@@ -18,6 +18,7 @@ defaults:
   tensor_parallel: 1
   gpu_memory_utilization: 0.25
   max_model_len: 32768
+  max_num_batched_tokens: 32768
   max_num_seqs: 256
 
 # VLLM_TEST_FORCE_FP8_MARLIN is needed to force the Marlin NVFP4 backend, since the default is flashinfer_cutlass when using NVFP4.
@@ -28,6 +29,7 @@ command: |
     --port {port} \
     --max-model-len {max_model_len} \
     --gpu-memory-utilization {gpu_memory_utilization} \
+    --max-num-batched-tokens {max_num_batched_tokens} \
     --max-num-seqs {max_num_seqs} \
     --moe-backend flashinfer_cutlass \
     --chat-template-content-format string

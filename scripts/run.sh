@@ -12,7 +12,7 @@ HF_CACHE="${HF_HOME:-$HOME/.cache/huggingface}/hub"
 # ── Map recipe name → Docker container name ───────────────────────────────────
 # Deterministic: vllm_ + slug with - and . replaced by _
 container_name() {
-    echo "vllm_$(echo "$1" | tr -- '-.' '__')"
+    echo "vllm_$(echo "$1" | tr -- '-./' '__')"
 }
 
 # ── Launch a recipe ───────────────────────────────────────────────────────────
@@ -29,8 +29,8 @@ launch() {
 
     # Stop the container if already running before relaunching
     if docker inspect "$cname" --format '{{.State.Running}}' 2>/dev/null | grep -q true; then
-        echo "Stopping running container: ${cname}"
-        docker stop "$cname" >/dev/null
+        echo "Stopping running container: ${cname} (timeout 60s)..."
+        docker stop --timeout 60 "$cname" >/dev/null
         echo "  ✓ Stopped"
         echo ""
     fi

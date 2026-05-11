@@ -13,7 +13,7 @@ defaults:
   tensor_parallel: 1
   gpu_memory_utilization: 0.37
   max_model_len: 32768
-  max_num_batched_tokens: 8192
+  max_num_batched_tokens: 32768
   max_num_seqs: 4
 
 env:
@@ -23,9 +23,9 @@ command: |
     --host {host} \
     --port {port} \
     --max-model-len {max_model_len} \
+    --gpu-memory-utilization {gpu_memory_utilization} \
     --max-num-batched-tokens {max_num_batched_tokens} \
     --max-num-seqs {max_num_seqs} \
-    --gpu-memory-utilization {gpu_memory_utilization} \
     --enforce-eager \
     --enable-auto-tool-choice \
     --tool-call-parser qwen3_coder \

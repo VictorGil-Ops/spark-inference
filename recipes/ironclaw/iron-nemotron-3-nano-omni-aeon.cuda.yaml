@@ -1,0 +1,39 @@
+# Recipe: Nemotron-3-Nano-Omni-30B — IronClaw agent mode (text-only)
+# No video/audio encoders — text + reasoning only
+# Memory: ~32GB | tok/s: ~50-58
+recipe_version: "1"
+name: Nemotron-3-Nano-Omni-Text-NVFP4
+description: Nemotron-Omni text-only mode for IronClaw — reasoning + tool calling (port 8000)
+
+model: AEON-7/Nemotron-3-Nano-Omni-AEON-Ultimate-Uncensored-NVFP4
+container: vllm-node
+solo_only: true
+
+defaults:
+  port: 8000
+  host: 0.0.0.0
+  tensor_parallel: 1
+  gpu_memory_utilization: 0.50
+  max_model_len: 65536
+  max_num_batched_tokens: 65536
+  max_num_seqs: 8
+
+command: |
+  vllm serve AEON-7/Nemotron-3-Nano-Omni-AEON-Ultimate-Uncensored-NVFP4 \
+    --host {host} \
+    --port {port} \
+    --max-model-len {max_model_len} \
+    --max-num-batched-tokens {max_num_batched_tokens} \
+    --max-num-seqs {max_num_seqs} \
+    --gpu-memory-utilization {gpu_memory_utilization} \
+    --trust-remote-code \
+    --kv-cache-dtype fp8 \
+    --load-format auto \
+    --attention-backend flashinfer \
+    --enable-prefix-caching \
+    --enable-auto-tool-choice \
+    --tool-call-parser hermes \
+    --reasoning-parser nemotron_v3 \
+    --chat-template-content-format string \
+    --stop-token-ids 11 \
+    --moe-backend flashinfer_cutlass

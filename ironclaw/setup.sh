@@ -184,7 +184,7 @@ except: print('nearai')
         printf "  Current: ${YELLOW}disabled${RESET}\n\n"
     fi
 
-    echo "  [1] Option A — Local (vLLM + BAAI/bge-m3, ~2GB VRAM)"
+    echo "  [1] Option A — Local (llama.cpp + nomic-embed-text-v1.5, ~100MB GGUF)"
     echo "  [2] Option B — NEAR AI cloud (requires API key)"
     echo "  [3] Disable embeddings"
     echo "  [q] Cancel"
@@ -202,50 +202,142 @@ except: print('nearai')
 }
 
 _embeddings_local() {
-    printf "\n${BOLD}--- Option A: Local embeddings (BAAI/bge-m3) ---${RESET}\n\n"
+    printf "\n${BOLD}--- Option A: Local embeddings (llama.cpp + nomic-embed-text-v1.5, ~100MB GGUF) ---${RESET}\n\n"
 
-    # Check if bge-m3 is already in LiteLLM config
-    local has_bge
-    has_bge=$(python3 -c "
+    # Check if nomic-embed-text is already in LiteLLM config
+    local has_nomic
+    has_nomic=$(python3 -c "
 import re
 try:
     raw = open('$LITELLM_CONFIG').read()
-    print('yes' if re.search(r'model_name:\s*bge-m3', raw) else 'no')
+    print('yes' if re.search(r'model_name:\s*nomic-embed-text', raw) else 'no')
 except: print('no')
 " 2>/dev/null)
 
     # Ask for port
-    ask "vLLM port for bge-m3 [8010]:"
+    ask "llama-server port for embeddings [8010]:"
     read -r embed_port
     embed_port="${embed_port:-8010}"
 
     # Ask for model name alias
-    ask "LiteLLM alias for embeddings [bge-m3]:"
+    ask "LiteLLM alias for embeddings [nomic-embed-text]:"
     read -r embed_alias
-    embed_alias="${embed_alias:-bge-m3}"
+    embed_alias="${embed_alias:-nomic-embed-text}"
 
-    # Check if vLLM is serving bge-m3 already
-    if curl -sf "http://127.0.0.1:${embed_port}/v1/models" > /dev/null 2>&1; then
-        ok "vLLM detected on port ${embed_port}"
-    else
-        warn "Nothing detected on port ${embed_port}."
-        echo ""
-        echo "  Start bge-m3 with vLLM first:"
-        echo "    vllm serve BAAI/bge-m3 --task embed --port ${embed_port} --host 0.0.0.0"
-        echo ""
-        ask "Continue anyway? [y/N]:"
-        read -r cont
-        [[ ! "$cont" =~ ^[yY] ]] && echo "Aborted." && return
+    # Ensure llama.cpp is installed
+    if ! command -v llama-server &>/dev/null; then
+        info "Installing llama.cpp..."
+        if [ ! -d ~/repos/llama.cpp ]; then
+            git clone https://github.com/ggerganov/llama.cpp ~/repos/llama.cpp
+        fi
+        cd ~/repos/llama.cpp
+        cmake --build . --target llama-server --config Release 2>/dev/null || make llama-server -j$(nproc) 2>/dev/null
+        if command -v llama-server &>/dev/null; then
+            ok "llama.cpp built"
+        else
+            fail "llama-server not found — install it first: git clone https://github.com/ggerganov/llama.cpp && make -j"
+            return 1
+        fi
     fi
 
-    # Add bge-m3 to LiteLLM config if not already there
-    if [ "$has_bge" = "no" ]; then
+    # Check or download GGUF nomic-embed-text-v1.5
+    local gguf_path=""
+    gguf_path=$(find ~/models -name '*nomic-embed-text*' -name '*.gguf' 2>/dev/null | head -1)
+    if [ -z "$gguf_path" ]; then
+        gguf_path=$(find ~/.cache/huggingface/hub -name '*nomic-embed-text*' -name '*.gguf' 2>/dev/null | head -1)
+    fi
+
+    if [ -n "$gguf_path" ] && [ -f "$gguf_path" ]; then
+        ok "Found nomic-embed-text GGUF: $gguf_path"
+    else
+        info "Downloading nomic-embed-text-v1.5 GGUF (~100MB)..."
+        mkdir -p ~/models/embeddings
+        gguf_path="$HOME/models/embeddings/nomic-embed-text-v1.5-f16.gguf"
+
+        if [ ! -f "$gguf_path" ]; then
+            echo ""
+            info "Select nomic-embed-text GGUF repo:"
+            echo "  [1] second-state/Nomic-embed-text-v1.5-Embedding-GGUF (HuggingFace)"
+            echo "  [2] I manually downloaded the GGUF elsewhere"
+            read -r gguf_src
+            case "$gguf_src" in
+                2) echo "  Full path to GGUF:"; read -r gguf_path; echo "" ;;
+                *) gguf_url="https://hf-mirror.com/second-state/Nomic-embed-text-v1.5-Embedding-GGUF/resolve/main/nomic-embed-text-v1.5-f16.gguf" ;;
+            esac
+            if [[ "$gguf_src" != "2" ]]; then
+                info "Downloading from HF mirror (this may take a few minutes)..."
+                curl -L -o "$gguf_path" "$gguf_url" 2>/dev/null || wget -O "$gguf_path" "$gguf_url" 2>/dev/null
+            fi
+
+            if [ ! -f "$gguf_path" ] || [ "$(_filesize "$gguf_path")" -lt 10000000 ]; then
+                fail "GGUF download failed or invalid"
+                return 1
+            fi
+        fi
+    fi
+
+    # Write embeddings.conf for systemd
+    mkdir -p "$HOME/.ironclaw"
+    cat > "$HOME/.ironclaw/embeddings.conf" << EOFCONF
+LLAMA_EMBED_MODEL_PATH=${gguf_path}
+LLAMA_EMBED_CTX_SIZE=2048
+LLAMA_EMBED_PORT=${embed_port}
+LLAMA_EMBED_NGL=35
+EOFCONF
+    ok "Wrote ${HOME}/.ironclaw/embeddings.conf"
+
+    # Create and install systemd service for llama-server
+    local llama_server_path="$HOME/repos/llama.cpp/build/bin/llama-server"
+    mkdir -p ~/.config/systemd/user
+    cat > ~/.config/systemd/user/llama-embed.service << EOFN
+[Unit]
+Description=llama-server for embedding (nomic-embed-text)
+After=network.target
+
+[Service]
+Type=simple
+User=%U
+EnvironmentFile=${HOME}/.ironclaw/embeddings.conf
+ExecStart=${llama_server_path} \\
+    --model %E{LLAMA_EMBED_MODEL_PATH} \\
+    --ctx-size %E{LLAMA_EMBED_CTX_SIZE} \\
+    --port %E{LLAMA_EMBED_PORT} \\
+    --host 0.0.0.0 \\
+    --embedding \\
+    -ngl %E{LLAMA_EMBED_NGL}
+Restart=always
+RestartSec=10
+StandardOutput=journal
+
+[Install]
+WantedBy=default.target
+EOFN
+
+    systemctl --user daemon-reload
+    systemctl --user enable llama-embed
+
+    # Stop any previous nohup process
+    if [ -f /tmp/llama-server-embed.pid ]; then
+        kill "$(cat /tmp/llama-server-embed.pid)" 2>/dev/null || true
+        rm -f /tmp/llama-server-embed.pid
+    fi
+
+    # Start service via systemd
+    info "Starting llama-server via systemd on port ${embed_port}..."
+    systemctl --user start llama-embed
+    sleep 1
+
+    _wait_for_port "$embed_port" "llama-server (embeddings)"
+    ok "llama-server ready on port ${embed_port}"
+
+    # Add nomic-embed-text to LiteLLM config if not already there
+    if [ "$has_nomic" = "no" ]; then
         cat >> "$LITELLM_CONFIG" << EOF
 
   - model_name: ${embed_alias}
     litellm_params:
-      model: openai/BAAI/bge-m3
-      api_base: http://127.0.0.1:${embed_port}/v1
+      model: openai/nomic-ai/nomic-embed-text-v1.5
+      api_base: http://127.0.0.1:${embed_port}
       api_key: sk-no-key
 EOF
         ok "Added ${embed_alias} to LiteLLM config"
@@ -254,14 +346,14 @@ EOF
         sleep 3
         ok "LiteLLM restarted"
     else
-        ok "bge-m3 already in LiteLLM config"
+        ok "nomic-embed-text already in LiteLLM config"
     fi
 
     # Update config.toml
     _update_embeddings_config "true" "openai_compatible" \
-        "${embed_alias}" "http://127.0.0.1:4000/v1" "sk-no-key"
+        "${embed_alias}" "http://127.0.0.1:${embed_port}" "sk-no-key"
 
-    ok "Embeddings configured: local bge-m3 via LiteLLM"
+    ok "Embeddings configured: local nomic-embed-text-v1.5 (llama.cpp, systemd-managed)"
     _restart_ironclaw
 }
 
@@ -332,6 +424,15 @@ open(config_path, 'w').write(raw)
 print('  config.toml updated')
 "
     ok "config.toml updated"
+}
+
+_filesize() {
+    local file="$1"
+    if [ -f "$file" ]; then
+        stat -c%s "$file" 2>/dev/null || stat -f%z "$file" 2>/dev/null || echo 0
+    else
+        echo 0
+    fi
 }
 
 _restart_ironclaw() {
@@ -760,6 +861,146 @@ print(f'  LiteLLM: removed {alias}')
     systemctl --user restart litellm 2>/dev/null && sleep 2 && ok "LiteLLM restarted"
 }
 
+# ── Uninstall ─────────────────────────────────────────────────────────────────
+uninstall() {
+    printf "\n${BOLD}🗑  Uninstall IronClaw${RESET}\n\n"
+    echo "  Workspace .md files are NEVER touched."
+    echo "  [1] IronClaw   — services, .ironclaw/, env vars; KEEP PostgreSQL, LiteLLM, binary"
+    echo "  [2] All else   — also DROP PostgreSQL, remove LiteLLM, ironclaw binary, llama.cpp"
+    echo "  [n] Cancel"
+    read -r mode
+    [[ "${mode,,}" == "n" ]] && echo "Aborted." && return
+
+    local drop_db=false drop_llm=false remove_binary=false remove_llamacpp=false
+    if [[ "${mode}" == "2" ]]; then
+        drop_db=true; drop_llm=true; remove_binary=true; remove_llamacpp=true
+        printf "\n${RED}⚠  Destructive — will also remove:${RESET}\n"
+        info "  - PostgreSQL (all data)"
+        info "  - LiteLLM (all configs)"
+        info "  - ironclaw binary"
+        info "  - llama.cpp source + build"
+        echo ""
+        echo "  [Y] Proceed"
+        echo "  [n] Cancel"
+        read -r confirm
+        [[ "${confirm,,}" != "y" ]] && echo "Aborted." && return
+    elif [[ "${mode}" != "1" ]]; then
+        echo "Invalid."
+        return
+    fi
+
+    printf "\n${GREEN}🗑 Cleaning...${RESET}\n\n"
+
+    # ── Stop & disable services ──
+    info "Stopping services..."
+    for svc in ironclaw llama-embed; do
+        systemctl --user stop "$svc" 2>/dev/null || true
+        systemctl --user disable "$svc" 2>/dev/null || true
+    done
+    [[ "$drop_llm" == true ]] && { systemctl --user stop litellm 2>/dev/null || true; systemctl --user disable litellm 2>/dev/null || true; }
+    systemctl --user daemon-reload 2>/dev/null || true
+    ok "Services stopped & disabled"
+
+    # ── Remove systemd unit files ──
+    info "Removing unit files..."
+    rm -f ~/.config/systemd/user/ironclaw.service
+    rm -f ~/.config/systemd/user/llama-embed.service
+    [[ "$drop_llm" == true ]] && rm -f ~/.config/systemd/user/litellm.service && rm -f ~/.config/systemd/user/postgresql.service
+    rm -f ~/.config/systemd/user/spark-watchdog.timer
+    systemctl --user daemon-reload 2>/dev/null || true
+    ok "Unit files removed"
+
+    # ── Remove .ironclaw (config + DB state) ──
+    info "Removing ~/.ironclaw..."
+    rm -rf ~/.ironclaw
+    ok "Done"
+
+    # ── Embeddings temp files ──
+    rm -f /tmp/llama-server-embed.pid /tmp/llama-server-embed.log
+
+    # ── Shell env lines ──
+    info "Removing shell env lines..."
+    for RC in ~/.bashrc ~/.profile ~/.zshrc; do
+        [ -f "$RC" ] && sed -i '/ironclaw\/.env/d' "$RC" 2>/dev/null || true
+    done
+    ok "Done"
+
+    # ── Kill leftover processes ──
+    info "Killing leftover processes..."
+    # Kill ironclaw binaries (any invocation, not just "ironclaw run")
+    pkill -f "'ironclaw'" 2>/dev/null || true
+    pkill -f "cargo.*run.*ironclaw" 2>/dev/null || true
+    # Also kill by PID name if patterns miss
+    killall -9 ironclaw 2>/dev/null || true
+    pkill -f "llama-server.*embedding" 2>/dev/null || true
+    pkill -f "nomic-embed-text" 2>/dev/null || true
+    [[ "$drop_llm" == true ]] && pkill -f "litellm" 2>/dev/null || true
+    [[ "$remove_llamacpp" == true ]] && killall -9 llama-server 2>/dev/null || true
+    ok "Done"
+
+    # ── DROP PostgreSQL ──
+    if [[ "$drop_db" == true ]]; then
+        echo ""
+        printf "${YELLOW}Dropping PostgreSQL data...${RESET}\n"
+        # Stop user-level service
+        systemctl --user stop postgresql 2>/dev/null || true
+        systemctl --user disable postgresql 2>/dev/null || true
+        # Stop system-level service (most common on Ubuntu)
+        sudo systemctl stop postgresql 2>/dev/null || true
+        sudo systemctl disable postgresql 2>/dev/null || true
+        # Stop via pg_lsclusters if available
+        if command -v pg_lsclusters &>/dev/null; then
+            for ver in $(pg_lsclusters -h | awk '{print $1}'); do
+                pg_dropcluster --stop $ver main 2>/dev/null \
+                    || sudo -u postgres pg_ctlcluster $ver main stop 2>/dev/null || true
+            done
+        fi
+        rm -rf "$PG_DATA"
+        echo "  ✅ PostgreSQL data removed ($(du -sh "${PG_DATA:-unknown}" 2>/dev/null | cut -f1))"
+    fi
+
+    # ── DROP LiteLLM config ──
+    if [[ "$drop_llm" == true ]]; then
+        echo ""
+        printf "${YELLOW}Removing LiteLLM config...${RESET}\n"
+        rm -rf ~/.litellm
+        echo "  ✅ LiteLLM config removed"
+    fi
+
+    # ── Remove ironclaw binary ──
+    if [[ "$remove_binary" == true ]]; then
+        echo ""
+        printf "${YELLOW}Removing ironclaw binary...${RESET}\n"
+        if [ -f "$HOME/.cargo/bin/ironclaw" ]; then
+            . "$HOME/.cargo/env" 2>/dev/null || true
+            if "$HOME/.cargo/bin/cargo" uninstall ironclaw 2>/dev/null; then
+                echo "  ✅ Binary removed"
+            else
+                rm -f "$HOME/.cargo/bin/ironclaw" && echo "  ✅ Binary removed (direct delete)"
+            fi
+        else
+            echo "  ✅ Binary not found, skipping"
+        fi
+    fi
+
+    # ── Remove llama.cpp ──
+    if [[ "$remove_llamacpp" == true ]]; then
+        echo ""
+        printf "${YELLOW}Removing llama.cpp...${RESET}\n"
+        rm -rf ~/repos/llama.cpp
+        echo "  ✅ Done"
+    fi
+
+    echo ""
+    if [[ "${mode}" == "1" ]]; then
+        echo "  ✅ IronClaw removed"
+        echo "  Kept: workspace .md files, PostgreSQL, LiteLLM, binary, llama.cpp"
+    else
+        echo "  ✅✅ Everything removed"
+        echo "  Kept: workspace .md files in $REPO_DIR"
+    fi
+}
+
 # ── Main menu ─────────────────────────────────────────────────────────────────
 if [ "${1:-}" = "model" ];      then change_model;       exit; fi
 if [ "${1:-}" = "embeddings" ]; then configure_embeddings; exit; fi
@@ -773,10 +1014,11 @@ if [ -f "$ENV_FILE" ]; then
     echo "  [1] Fresh install (overwrites existing setup)"
     echo "  [2] Change default LLM model"
     echo "  [3] Configure embeddings"
-    echo "  [4] Manage inference models (vLLM / Atlas)"
+    echo "  [4] Uninstall IronClaw (clean removal)"
     echo "  [q] Quit"
 else
     echo "  [1] Install IronClaw"
+    echo "  [5] Uninstall IronClaw (clean removal)"
     echo "  [q] Quit"
 fi
 
@@ -788,7 +1030,7 @@ case "$sel" in
     1) run_install ;;
     2) change_model ;;
     3) configure_embeddings ;;
-    4) manage_models ;;
+    4) uninstall ;;
     q|Q) echo "Bye." ;;
     *) echo "Invalid." ;;
 esac

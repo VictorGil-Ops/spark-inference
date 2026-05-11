@@ -35,10 +35,10 @@ command: |
     --kv-cache-dtype fp8 \
     --moe-backend cutlass \
     --trust-remote-code \
-    --max-model-len {max_model_len} \
     --gpu-memory-utilization {gpu_memory_utilization} \
-    --max-num-batched-tokens {max_num_batched_tokens} \
+    --max-model-len {max_model_len} \
     --max-num-seqs {max_num_seqs} \
+    --max-num-batched-tokens {max_num_batched_tokens} \
     --enable-prefix-caching \
     --enable-auto-tool-choice \
     --tool-call-parser hermes \

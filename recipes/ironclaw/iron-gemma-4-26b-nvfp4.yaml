@@ -3,7 +3,7 @@
 # Memory: ~117GB | tok/s: ~29
 recipe_version: "1"
 name: Gemma-4-26B-A4B-NVFP4
-description: nvidia/Gemma-4-26B-A4B-NVFP4 multimodal (port 8005)
+description: nvidia/Gemma-4-26B-A4B-NVFP4 multimodal (port 8200)
 
 model: nvidia/Gemma-4-26B-A4B-NVFP4
 container: vllm-node
@@ -26,9 +26,9 @@ command: |
     --host {host} \
     --port {port} \
     --max-model-len {max_model_len} \
-    --gpu-memory-utilization {gpu_memory_utilization} \
     --max-num-batched-tokens {max_num_batched_tokens} \
     --max-num-seqs {max_num_seqs} \
+    --gpu-memory-utilization {gpu_memory_utilization} \
     --enable-chunked-prefill \
     --attention-backend triton_attn \
     --load-format safetensors \

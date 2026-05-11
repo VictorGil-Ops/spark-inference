@@ -18,10 +18,10 @@ DB_NAME="ironclaw"
 _first_litellm_model=$(python3 -c "
 import re, sys
 try:
-    m = re.search(r'model_name:\s*(\S+)', open('$LITELLM_CONFIG').read())
+    m = re.search(r'model_name:\s*(\S+)', open(sys.argv[1]).read())
     print(m.group(1) if m else '')
 except: print('')
-" 2>/dev/null)
+" "$LITELLM_CONFIG" 2>/dev/null)
 DEFAULT_MODEL="${5:-${_first_litellm_model}}"
 
 # HF model ID: read from recipe whose port matches the litellm api_base for DEFAULT_MODEL
@@ -49,46 +49,225 @@ if [ -z "$TELEGRAM_TOKEN" ] || [ -z "$TELEGRAM_USER_ID" ]; then
     exit 1
 fi
 
-# 1. PostgreSQL
-echo "--- Setting up PostgreSQL ---"
-sudo apt-get install -y postgresql postgresql-contrib libpq-dev postgresql-server-dev-all
-sudo systemctl start postgresql
-sudo systemctl enable postgresql
-sudo -u postgres psql -c "CREATE USER ${DB_USER} WITH PASSWORD '${DB_PASS}';" 2>/dev/null || true
-sudo -u postgres createdb ${DB_NAME} -O ${DB_USER} 2>/dev/null || true
-# Disable SSL — ironclaw's Rust driver doesn't handle self-signed certs
-sudo -u postgres psql -c "ALTER SYSTEM SET ssl = off;" 2>/dev/null || true
-sudo -u postgres psql -c "SELECT pg_reload_conf();" 2>/dev/null || true
+# ── 1. PostgreSQL + pgvector ─────────────────────────────────────────────
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  [1/6] PostgreSQL + pgvector"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+if ! systemctl --user is-active --quiet postgresql 2>/dev/null && ! sudo systemctl is-active --quiet postgresql 2>/dev/null; then
+    echo "  → Installing PostgreSQL..."
+    sudo apt-get update -qq
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq postgresql postgresql-contrib libpq-dev postgresql-server-dev-all >/dev/null 2>&1
+    
+    # Start it
+    sudo systemctl start postgresql
+    sudo systemctl enable postgresql
+    
+    # Create user + DB
+    sudo -u postgres psql -c "CREATE USER ${DB_USER} WITH PASSWORD '${DB_PASS}';" 2>/dev/null || true
+    sudo -u postgres createdb ${DB_NAME} -O ${DB_USER} 2>/dev/null || true
+    
+    # Disable SSL — ironclaw's Rust driver doesn't handle self-signed certs
+    sudo -u postgres psql -c "ALTER SYSTEM SET ssl = off;" 2>/dev/null || true
+    sudo -u postgres psql -c "SELECT pg_reload_conf();" 2>/dev/null || true
+    echo "  ✓ PostgreSQL ready (user: ${DB_USER}, db: ${DB_NAME})"
+else
+    echo "  ✓ PostgreSQL already installed and running"
+fi
 
 # pgvector
+echo "  → Checking pgvector..."
 if [ ! -d /tmp/pgvector ]; then
-    git clone --depth 1 https://github.com/pgvector/pgvector.git /tmp/pgvector
+    git clone --depth 1 https://github.com/pgvector/pgvector.git /tmp/pgvector 2>/dev/null || true
 fi
-cd /tmp/pgvector && make && sudo make install
+cd /tmp/pgvector && make -j"$(nproc)" 2>/dev/null && sudo make install 2>/dev/null || echo "  ⚠ pgvector may already be installed"
 psql "postgres://${DB_USER}:${DB_PASS}@localhost:5432/${DB_NAME}?sslmode=disable" \
     -c "CREATE EXTENSION IF NOT EXISTS vector;" 2>/dev/null || true
+echo "  ✓ pgvector ready"
 
-# 2. Rust
-echo "--- Installing Rust ---"
+# ── 2. Rust + LLVM ──────────────────────────────────────────────────────
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  [2/6] Rust + llama.cpp"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
 if ! command -v rustc &>/dev/null; then
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+    echo "  → Installing Rust..."
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y 2>/dev/null
 fi
 source ~/.cargo/env
 
-# 3. IronClaw
-echo "--- Building IronClaw ---"
+echo "  → Building llama.cpp..."
+if [ ! -d ~/repos/llama.cpp ]; then
+    git clone https://github.com/ggerganov/llama.cpp.git ~/repos/llama.cpp 2>/dev/null || true
+fi
+cd ~/repos/llama.cpp
+git pull 2>/dev/null || true
+mkdir -p build && cd build && cmake .. -DBUILD_SHARED_LIBS=OFF -DLLAMA_CURL=ON 2>/dev/null || true
+cmake --build . -j"$(nproc)" 2>/dev/null || echo "  ⚠ llama.cpp may already be built"
+echo "  ✓ llama.cpp ready"
+
+# ── 3. LiteLLM ──────────────────────────────────────────────────────────
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  [3/6] LiteLLM"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+echo "  → Installing LiteLLM..."
+pip3 install litellm[proxy] --quiet 2>/dev/null || pip3 install litellm --quiet 2>/dev/null || true
+echo "  ✓ pip install done"
+
+# Create LiteLLM config dir
+mkdir -p ~/.litellm
+
+# Copy the config
+if [ -f "$LITELLM_CONFIG" ]; then
+    cp "$LITELLM_CONFIG" ~/.litellm/litellm_config.yaml
+    echo "  ✓ LiteLLM config in place"
+else
+    echo "  ⚠ Warning: $LITELLM_CONFIG not found"
+fi
+
+# Systemd service for LiteLLM
+echo "  → Creating systemd service..."
+cat > ~/.config/systemd/user/litellm.service << EOF
+[Unit]
+Description=LiteLLM Proxy
+After=network.target postgresql-startup.service
+
+[Service]
+Type=simple
+WorkingDirectory=$REPO_DIR
+Environment=HOME=$HOME
+Environment=PATH=$PATH
+ExecStart=/home/${USER}/.local/bin/litellm --config /home/${USER}/.litellm/litellm_config.yaml
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
+EOF
+
+systemctl --user daemon-reload
+systemctl --user enable litellm 2>/dev/null || true
+echo "  ✓ litellm.service installed"
+
+# ── 4. Embeddings (llama.cpp + nomic-embed-text) ────────────────────────
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  [4/6] Embeddings (nomic-embed-text-v1.5)"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+EMBED_PORT="${EMBED_PORT:-8010}"
+LLAMA_SERVER_PATH="$HOME/repos/llama.cpp/build/bin/llama-server"
+
+# Download GGUF if not present
+GGUF_PATH="$HOME/models/embeddings/nomic-embed-text-v1.5-f16.gguf"
+if [ ! -f "$GGUF_PATH" ]; then
+    echo "  → Downloading nomic-embed-text (~100MB)..."
+    mkdir -p "$HOME/models/embeddings"
+    
+    # Mirror list
+    GGUF_URLS=(
+        "https://hf-mirror.com/second-state/Nomic-embed-text-v1.5-Embedding-GGUF/resolve/main/nomic-embed-text-v1.5-f16.gguf"
+        "https://huggingface.co/second-state/Nomic-embed-text-v1.5-Embedding-GGUF/resolve/main/nomic-embed-text-v1.5-f16.gguf"
+    )
+    
+    for url in "${GGUF_URLS[@]}"; do
+        if curl -sfL --connect-timeout 5 --max-time 600 -o "$GGUF_PATH" "$url"; then
+            echo "  ✓ Downloaded from $url"
+            break
+        fi
+    done
+    
+    if [ ! -f "$GGUF_PATH" ]; then
+        echo "  ⚠ Download failed — will retry on next startup"
+        # Set dummy path so system still starts (just won't embed)
+        GGUF_PATH="/tmp/nomic-embed-text-v1.5-f16.gguf"
+    fi
+fi
+
+# embeddings.conf
+mkdir -p ~/.ironclaw
+cat > ~/.ironclaw/embeddings.conf << EMBEDCONF
+LLAMA_EMBED_MODEL_PATH=${GGUF_PATH}
+LLAMA_EMBED_CTX_SIZE=2048
+LLAMA_EMBED_PORT=${EMBED_PORT}
+LLAMA_EMBED_NGL=35
+EMBEDCONF
+
+# llama-embed systemd service
+cat > ~/.config/systemd/user/llama-embed.service << EOF
+[Unit]
+Description=llama-server for embedding (nomic-embed-text)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=$REPO_DIR
+EnvironmentFile=/home/${USER}/.ironclaw/embeddings.conf
+Environment=PATH=$PATH
+ExecStart=${LLAMA_SERVER_PATH} \\
+    --model ${GGUF_PATH} \\
+    --ctx-size 2048 \\
+    --batch-size 2048 \\
+    --ubatch-size 2048 \\
+    --port ${EMBED_PORT} \\
+    --host 0.0.0.0 \\
+    --embedding \\
+    -ngl 35
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
+EOF
+
+# Start services in dependency order
+echo "  → Starting LiteLLM..."
+systemctl --user restart litellm
+for i in $(seq 1 15); do
+    curl -sf http://127.0.0.1:4000/v1/models >/dev/null 2>&1 && break
+    sleep 1
+done
+systemctl --user is-active --quiet litellm && echo "  ✓ LiteLLM running on port 4000" || echo "  ⚠ LiteLLM check timed out (may need restart)"
+
+echo "  → Starting embedding server..."
+systemctl --user start llama-embed 2>/dev/null || true
+systemctl --user enable llama-embed 2>/dev/null || true
+systemctl --user daemon-reload
+for i in $(seq 1 10); do
+    curl -sf http://127.0.0.1:${EMBED_PORT}/embeddings >/dev/null 2>&1 && break
+    sleep 1
+done
+systemctl --user is-active --quiet llama-embed && echo "  ✓ Embedding server running on port ${EMBED_PORT}" || echo "  ⚠ Embedding server not responding yet (may need restart)"
+
+# ── 5. IronClaw ────────────────────────────────────────────────────────
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  [5/6] IronClaw"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+echo "  → Building/instaling IronClaw..."
 if [ ! -d ~/repos/ironclaw ]; then
     git clone https://github.com/nearai/ironclaw.git ~/repos/ironclaw
 fi
 cd ~/repos/ironclaw
-cargo install --path . --bin ironclaw
+cargo install --path . --bin ironclaw 2>/dev/null || \
+    cargo install --path . --force --bin ironclaw 2>/dev/null || \
+    echo "  ⚠ IronClaw may already be installed"
+echo "  ✓ ironclaw binary ready"
 
-# 4. .env — generate SECRETS_MASTER_KEY once, never overwrite
-echo "--- Creating .env ---"
+# .env — generate SECRETS_MASTER_KEY once, never overwrite
+echo "  → Creating .env..."
 mkdir -p ~/.ironclaw
 SECRETS_KEY="$(openssl rand -hex 32)"
 GATEWAY_TOKEN="$(openssl rand -hex 32)"
-# If .env already exists, reuse stable secrets
 if [ -f ~/.ironclaw/.env ]; then
     EXISTING_KEY=$(grep '^SECRETS_MASTER_KEY=' ~/.ironclaw/.env | cut -d= -f2)
     EXISTING_GW=$(grep '^GATEWAY_AUTH_TOKEN=' ~/.ironclaw/.env | tr -d '"' | cut -d= -f2)
@@ -106,34 +285,38 @@ LLM_BASE_URL=http://127.0.0.1:4000/v1
 LLM_API_KEY=sk-no-key
 LLM_MODEL=${DEFAULT_MODEL}
 ONBOARD_COMPLETED=true
-CLI_MODE=plain
+ALLOW_LOCAL_TOOLS=true
 GATEWAY_AUTH_TOKEN=${GATEWAY_TOKEN}
+OPENAI_API_KEY=sk-no-key
+EMBEDDING_ENABLED=true
+EMBEDDING_PROVIDER=openai
+EMBEDDING_BASE_URL=http://127.0.0.1:${EMBED_PORT}
+EMBEDDING_MODEL=nomic-embed-text-v1.5-f16.gguf
+EMBEDDING_DIM=768
 EOF
 chmod 600 ~/.ironclaw/.env
+echo "  ✓ .env created"
 
-# 5. Workspace — identity and personality files
-echo "--- Setting up workspace ---"
+# Workspace — identity and personality files
+echo "  → Setting up workspace..."
 mkdir -p ~/.ironclaw/workspace
 
-# Only seed files that don't exist yet — never overwrite user edits
 _seed_file() {
     local dst="$1" src="$2"
     if [ ! -f "$dst" ]; then
         if [ -f "$src" ]; then
             cp "$src" "$dst"
-            echo "  → seeded $(basename $dst) from template"
+            echo "    → seeded $(basename $dst)"
         else
-            echo "  → creating default $(basename $dst)"
+            echo "    → creating default $(basename $dst)"
             cat > "$dst"
         fi
     else
-        echo "  → $(basename $dst) already exists, skipping"
+        echo "    → $(basename $dst) exists, keeping"
     fi
 }
 
-# IDENTITY.md
-_seed_file ~/.ironclaw/workspace/IDENTITY.md \
-    "$WORKSPACE_TEMPLATE/IDENTITY.md" << 'IDENTITY_EOF'
+_seed_file ~/.ironclaw/workspace/IDENTITY.md "$WORKSPACE_TEMPLATE/IDENTITY.md" << 'IDENTITY_EOF'
 # Identity
 
 - **Name:** Sparky
@@ -144,16 +327,14 @@ _seed_file ~/.ironclaw/workspace/IDENTITY.md \
 - Doesn't pad. If the answer is one word, gives one word.
 - Has its own opinions. Pushes back when it matters.
 - Curious about technology, especially local AI and hardware.
-- Informal tone with Victor, more formal in external channels.
+- Informal tone with User, more formal in external channels.
 
 ## Voice
 Speaks in first person. Doesn't constantly introduce itself.
 Never says "Sure!", "Of course!", or "As an AI assistant..."
 IDENTITY_EOF
 
-# SOUL.md
-_seed_file ~/.ironclaw/workspace/SOUL.md \
-    "$WORKSPACE_TEMPLATE/SOUL.md" << 'SOUL_EOF'
+_seed_file ~/.ironclaw/workspace/SOUL.md "$WORKSPACE_TEMPLATE/SOUL.md" << 'SOUL_EOF'
 # Core Values
 
 Be genuinely helpful, not performatively helpful. Skip filler phrases.
@@ -181,9 +362,7 @@ Always respond in the same language the user writes in.
 Default to English unless told otherwise.
 SOUL_EOF
 
-# USER.md
-_seed_file ~/.ironclaw/workspace/USER.md \
-    "$WORKSPACE_TEMPLATE/USER.md" << USER_EOF
+_seed_file ~/.ironclaw/workspace/USER.md "$WORKSPACE_TEMPLATE/USER.md" << USER_EOF
 # User
 
 - **Name:** Master
@@ -199,37 +378,31 @@ _seed_file ~/.ironclaw/workspace/USER.md \
 - Values efficiency and working setups over explanations of why things are hard.
 USER_EOF
 
-# AGENTS.md
-_seed_file ~/.ironclaw/workspace/AGENTS.md \
-    "$WORKSPACE_TEMPLATE/AGENTS.md" << AGENTS_EOF
+_seed_file ~/.ironclaw/workspace/AGENTS.md "$WORKSPACE_TEMPLATE/AGENTS.md" << AGENTS_EOF
 # Agents
 
 ## Sparky
 The primary agent. Personal assistant running on sparky-one.
 - Handles day-to-day tasks, questions, and automation via Telegram.
 - Has full access to tools: web search, GitHub, Telegram MTProto, LLM context.
-- Default model: set via LiteLLM (see `selected_model` in DB).
+- Default model: set via LiteLLM (see \`selected_model\` in DB).
 - Acts cautiously on external actions, autonomously on internal ones.
 
 ## Model Roster
 Models available through LiteLLM on port 4000:
-
-| Alias           | Model                                      | Backend | Port  |
-|-----------------|--------------------------------------------|---------|-------|
-| nemotron-nano   | NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4       | vLLM    | 8000  |
-| nemotron-omni   | Nemotron-3-Nano-Omni-30B-A3B-Reasoning     | vLLM    | 8000  |
-| qwen36          | Qwen3.6-35B-A3B-FP8                        | vLLM    | 8001  |
-| foundation-sec  | Foundation-Sec-8B-Instruct                 | vLLM    | 8002  |
-| primus          | Llama-Primus-Reasoning                     | vLLM    | 8002  |
-| nemotron-super  | NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4    | vLLM    | 8100  |
-| nemotron-nano-w4| nemotron3-nano-nvfp4-w4a16                 | vLLM    | 8004  |
-| gemma-4         | Gemma-4-26B-A4B-NVFP4                      | vLLM    | 8200  |
+$(python3 -c "
+import re
+yaml_content = open('$LITELLM_CONFIG').read()
+patterns = re.findall(r'model_name:\s*(\S+).*?api_base:\s*http://\d+\.\d+\.\d+\.\d+:(\d+)', yaml_content, re.DOTALL)
+for alias, port in patterns:
+    print(f'- {alias} (port {port})')
+")
 
 ## Switching Models
 Use the setup wizard:
-```bash
+\`\`\`bash
 ~/repos/spark-inference/ironclaw/setup.sh model
-```
+\`\`\`
 
 ## Tool Access
 - **web_search** — general search
@@ -240,53 +413,65 @@ AGENTS_EOF
 
 echo "  ✓ Workspace ready at ~/.ironclaw/workspace/"
 
-# Import workspace files into ironclaw memory
-echo "--- Importing workspace into ironclaw memory ---"
+# ── 6. DB migrations + config + start ────────────────────────────────────
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  [6/6] DB migrations + config + start"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+echo "  → Applying DB migrations..."
+export $(grep -v '^#' ~/.ironclaw/.env | xargs)
+timeout 30 ironclaw run --no-onboard 2>/dev/null || true
+
+echo "  → Importing workspace files into memory..."
 for f in IDENTITY.md SOUL.md USER.md AGENTS.md; do
     src="$HOME/.ironclaw/workspace/$f"
     if [ -f "$src" ]; then
         ironclaw memory write "$f" "$(cat "$src")" 2>/dev/null \
-            && echo "  → imported $f" \
-            || echo "  ! failed $f (will retry on next reset)"
+            && echo "    → imported $f" \
+            || echo "    ! $f failed (will retry on restart)"
     fi
 done
 
-# 6. Run once to apply DB migrations, then stop
-echo "--- Applying migrations ---"
-export $(grep -v '^#' ~/.ironclaw/.env | xargs)
-timeout 15 ironclaw run --no-onboard 2>/dev/null || true
-
-# 7. Configure DB settings
-echo "--- Configuring DB settings ---"
+echo "  → Configuring DB settings..."
 DB_URL="postgres://${DB_USER}:${DB_PASS}@localhost:5432/${DB_NAME}?sslmode=disable"
 psql "$DB_URL" << SQLEOF
 INSERT INTO settings (user_id, key, value) VALUES
-  ('default', 'llm_backend',              '"openai_compatible"'),
-  ('default', 'llm_base_url',             '"http://127.0.0.1:4000/v1"'),
-  ('default', 'llm_model',                '"${DEFAULT_MODEL}"'),
-  ('default', 'selected_model',           '"${DEFAULT_MODEL}"'),
-  ('default', 'channels.cli_enabled',     'false'),
-  ('default', 'channels.cli_mode',        '"plain"'),
-  ('default', 'channels.wasm_channels',   '["telegram"]'),
-  ('default', 'channels.wasm_channels_enabled', 'true'),
-  ('default', 'telegram_bot_token',       '"${TELEGRAM_TOKEN}"'),
-  ('default', 'telegram_allow_from',      '["${TELEGRAM_USER_ID}"]'),
-  ('default', 'telegram_polling_enabled', 'true'),
-  ('default', 'activated_channels',       '["telegram"]'),
-  ('default', 'safety.max_output_length',          '100000'),
-  ('default', 'skills.max_context_tokens',          '28000'),
-  ('default', 'routines.max_lightweight_tokens',    '28000')
+  ('default', 'llm_backend',                              '"openai_compatible"'),
+  ('default', 'llm_base_url',                             '"http://127.0.0.1:4000/v1"'),
+  ('default', 'llm_model',                                '"${DEFAULT_MODEL}"'),
+  ('default', 'selected_model',                           '"${DEFAULT_MODEL}"'),
+  ('default', 'channels.cli_enabled',                     'false'),
+  ('default', 'channels.cli_mode',                        '"plain"'),
+  ('default', 'channels.wasm_channels',                   '["telegram"]'),
+  ('default', 'channels.wasm_channels_enabled',           'true'),
+  ('default', 'telegram_bot_token',                       '"${TELEGRAM_TOKEN}"'),
+  ('default', 'telegram_allow_from',                      '["${TELEGRAM_USER_ID}"]'),
+  ('default', 'telegram_polling_enabled',                 'true'),
+  ('default', 'activated_channels',                       '["telegram"]'),
+  ('default', 'tools.allow_local_tools',                  'true'),
+  ('default', 'tools.sandbox_workspace_write',            'true'),
+  ('default', 'tools.skills_enabled',                     'true'),
+  ('default', 'safety.max_output_length',                 '100000'),
+  ('default', 'skills.max_context_tokens',                '28000'),
+  ('default', 'routines.max_lightweight_tokens',          '28000'),
+    ('default', 'embedding.backend',                        '"openai_compatible"'),
+    ('default', 'embedding.endpoint',                       '"http://127.0.0.1:${EMBED_PORT}"'),
+    ('default', 'embedding.vector_store',                   '"pgvector"'),
+    ('default', 'embedding.hybrid_search',                  'true'),
+    ('default', 'embedding.dimensions',                     '768'),
+    ('default', 'embeddings.model',                         '"nomic-embed-text-v1.5-f16.gguf"'),
+    ('default', 'embeddings.enabled',                       'true'),
+    ('default', 'embeddings.provider',                      '"openai"'),
+  ('default', 'thinking.mode',                            '"auto"'),
+  ('default', 'thinking.auto_threshold',                  '512'),
+  ('default', 'thinking.max_tokens',                      '16384')
 ON CONFLICT (user_id, key) DO UPDATE SET value = EXCLUDED.value;
 SQLEOF
+echo "  ✓ DB settings configured"
 
-# 8. Install WASM channels
-echo "--- Installing WASM channels ---"
-mkdir -p ~/.ironclaw/channels
-ironclaw registry install telegram 2>/dev/null || \
-    echo "Install telegram.wasm manually into ~/.ironclaw/channels/"
-
-# Enable polling in telegram.capabilities.json
-echo "--- Fixing Telegram polling in capabilities.json ---"
+# Fix Telegram polling
+echo "  → Fixing Telegram polling..."
 python3 -c "
 import json, os
 path = os.path.expanduser('~/.ironclaw/channels/telegram.capabilities.json')
@@ -297,50 +482,135 @@ if os.path.exists(path):
     json.dump(d, open(path,'w'), indent=2)
     print('  polling_enabled: True')
 else:
-    print('  WARNING: telegram.capabilities.json not found')
+    print('  telegram.capabilities.json not found — OK on first install')
 "
 
-# 9. Systemd service
-echo "--- Installing systemd service ---"
-mkdir -p ~/.config/systemd/user
+# WASM channels
+mkdir -p ~/.ironclaw/channels
+ironclaw registry install telegram 2>/dev/null || \
+    echo "  ⚠ Install telegram.wasm manually into ~/.ironclaw/channels/"
+
+# Systemd service for IronClaw
+echo "  → Creating systemd service..."
 cat > ~/.config/systemd/user/ironclaw.service << EOF
 [Unit]
 Description=IronClaw daemon
-After=network.target
+After=network.target llama-embed.service litellm.service
 
 [Service]
 Type=simple
 EnvironmentFile=/home/${USER}/.ironclaw/.env
+WorkingDirectory=$REPO_DIR
 ExecStart=/home/${USER}/.cargo/bin/ironclaw run --no-onboard
 Restart=always
 RestartSec=5
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=default.target
 EOF
 
 systemctl --user daemon-reload
-systemctl --user enable ironclaw
-systemctl --user start ironclaw
+systemctl --user enable ironclaw 2>/dev/null || true
 
 # Source .env in shell startup
 SHELL_LINE='[ -f "$HOME/.ironclaw/.env" ] && set -a && . "$HOME/.ironclaw/.env" && set +a'
 for RC in ~/.bashrc ~/.profile; do
     if [ -f "$RC" ] && ! grep -qF 'ironclaw/.env' "$RC"; then
-        if [ "$RC" = "$HOME/.bashrc" ]; then
-            sed -i '/^# If not running interactively/i '"$SHELL_LINE"'' "$RC" 2>/dev/null || echo "$SHELL_LINE" >> "$RC"
-        else
-            echo "$SHELL_LINE" >> "$RC"
-        fi
-        echo "  Added ironclaw env to $RC"
+        echo "$SHELL_LINE" >> "$RC" 2>/dev/null
+        echo "    → source .ironclaw/.env in $RC"
     fi
 done
 
+echo "  → Starting IronClaw..."
+systemctl --user start ironclaw 2>/dev/null || true
+sleep 3
+systemctl --user is-active --quiet ironclaw && echo "  ✓ ironclaw.service running" || echo "  ⚠ ironclaw may fail — check: journalctl --user -u ironclaw -n 20"
+
+systemctl --user daemon-reload
+systemctl --user enable llama-embed 2>/dev/null || true
+systemctl --user start llama-embed 2>/dev/null || true
+
+# ── Summary ───────────────────────────────────────────────────────────────
 echo ""
-echo "=== IronClaw installed ==="
-echo "  Model:     ${DEFAULT_MODEL}"
-echo "  Workspace: ~/.ironclaw/workspace/"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  ✅ IronClaw install complete!"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
-echo "Wait 10 seconds and send a message to your Telegram bot."
-echo "You will receive a pairing code. Then run:"
-echo "  ironclaw pairing approve telegram <CODE>"
+echo "  Components:"
+echo "  ─────────────────────────────────────────"
+printf "  ${GREEN}●${RESET} PostgreSQL      ${DB_NAME} (user: ${DB_USER})\n"
+systemctl --user is-active --quiet postgresql 2>/dev/null && printf "                     ${GREEN}running${RESET}\n" || printf "                     ${YELLOW}manual start: sudo systemctl start postgresql${RESET}\n"
+
+printf "  ${GREEN}●${RESET} LiteLLM         port ${CYAN}4000${RESET}\n"
+systemctl --user is-active --quiet litellm 2>/dev/null && printf "                     ${GREEN}running${RESET}\n" || printf "                     ${YELLOW}stopped${RESET}\n"
+
+DB_URL="postgres://${DB_USER}:${DB_PASS}@localhost:5432/${DB_NAME}?sslmode=disable"
+
+# 1. Running docker container (most accurate)
+ACTIVE_MODEL=$(docker ps --format '{{.Names}}' 2>/dev/null | grep -E '^(vllm|atlas)[-_]' | head -1 | sed 's/^vllm[-_]//;s/^atlas[-_]//')
+
+# 2. Fallback to last_model file
+if [ -z "$ACTIVE_MODEL" ] && [ -f "$HOME/.ironclaw/last_model" ]; then
+    ACTIVE_MODEL=$(cat "$HOME/.ironclaw/last_model" | tr -d '[:space:]')
+fi
+
+# 3. Fallback to DB selected_model
+if [ -z "$ACTIVE_MODEL" ]; then
+    ACTIVE_MODEL=$(psql "$DB_URL" -tAc "SELECT value FROM settings WHERE user_id='default' AND key='selected_model' LIMIT 1;" 2>/dev/null | tr -d '"' || echo "")
+fi
+
+VLLM_RUNNING=$(docker ps --format "{{.Names}}" 2>/dev/null | grep -E "^(vllm|atlas)-" | head -1 || true)
+
+echo "  Active model: ${CYAN}${ACTIVE_MODEL:-none}${RESET}"
+if [ -n "$VLLM_RUNNING" ]; then
+    printf "  ${GREEN}● running${RESET}  on %s\n" "$VLLM_RUNNING"
+else
+    printf "  ${YELLOW}○ stopped${RESET}  (vLLM container not running)\n"
+fi
+
+echo ""
+echo "  All registered models:"
+
+# Write a temp Python script for model listing
+_MODELS_TMP=$(mktemp /tmp/ironclaw-models-XXXXXX.py)
+cat > "$_MODELS_TMP" << 'PYEOF'
+import re, sys
+yaml_path = sys.argv[1]
+active = sys.argv[2] if len(sys.argv) > 2 else ""
+try:
+    raw = open(yaml_path).read()
+    blocks = re.findall(r'model_name:\s*(\S+).*?api_base:\s*http://([\d.]+):(\d+)', raw, re.DOTALL)
+    for alias, ip, port in blocks:
+        marker = ''
+        prefix = ''
+        if alias == active:
+            marker = ' ⟹ active'
+            prefix = '    -->'
+        else:
+            prefix = '         '
+        print(f'  {prefix} {alias}{marker}')
+except Exception as e:
+    print(f'  (error reading config: {e})')
+PYEOF
+python3 "$_MODELS_TMP" "$LITELLM_CONFIG" "$ACTIVE_MODEL" 2>/dev/null || echo "    (config error)"
+rm -f "$_MODELS_TMP"
+
+printf "  ${GREEN}●${RESET} Embeddings      port ${EMBED_PORT} (nomic-embed-text)\n"
+systemctl --user is-active --quiet llama-embed 2>/dev/null && printf "                     ${GREEN}running${RESET}\n" || printf "                     ${YELLOW}stopped${RESET}\n"
+
+printf "  ${GREEN}●${RESET} IronClaw        telegram + CLI\n"
+systemctl --user is-active --quiet ironclaw 2>/dev/null && printf "                     ${GREEN}running${RESET}\n" || printf "                     ${YELLOW}stopped${RESET}\n"
+
+echo "  "
+echo "  ─────────────────────────────────────────"
+echo "  Next steps:"
+echo "  ─────────────────────────────────────────"
+echo "  1. Wait 10 seconds and send a message to your Telegram bot"
+echo "  2. You'll receive a pairing code → run:"
+echo "     ironclaw pairing approve telegram <CODE>"
+echo ""
+echo "  Manage models: bash ironclaw/setup.sh"
+echo "  Check status:  bash spark.sh"
+echo ""

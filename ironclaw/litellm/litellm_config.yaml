@@ -13,7 +13,13 @@ model_list:
   - model_name: nemotron-omni
     litellm_params:
       model: openai/nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4
-      api_base: http://127.0.0.1:8000/v1
+      api_base: http://127.0.0.1:8007/v1
+      api_key: sk-no-key
+
+  - model_name: nemotron-omni-aeon
+    litellm_params:
+      model: openai/AEON-7/Nemotron-3-Nano-Omni-AEON-Ultimate-Uncensored-NVFP4
+      api_base: http://127.0.0.1:8007/v1
       api_key: sk-no-key
 
   - model_name: nemotron-nano
@@ -52,8 +58,23 @@ model_list:
       api_base: http://127.0.0.1:8004/v1
       api_key: sk-no-key
 
+  - model_name: nomic-embed-text
+    model_type: embedding
+    litellm_params:
+      model: openai/nomic-embed-text-v1.5-f16.gguf
+      api_base: http://127.0.0.1:8010/v1
+      api_key: sk-no-key
+
+  - model_name: qwen35
+    litellm_params:
+      model: openai/qwen/qwen3.5
+      api_base: http://127.0.0.1:8300/v1
+      api_key: sk-no-key
+
   - model_name: gemma-4
     litellm_params:
       model: openai/nvidia/Gemma-4-26B-A4B-NVFP4
       api_base: http://127.0.0.1:8200/v1
       api_key: sk-no-key
+    model_info:
+      supports_function_calling: true

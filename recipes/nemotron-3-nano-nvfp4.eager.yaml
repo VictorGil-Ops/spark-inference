@@ -24,6 +24,7 @@ defaults:
   tensor_parallel: 1
   gpu_memory_utilization: 0.25
   max_model_len: 32768
+  max_num_batched_tokens: 32768
   max_num_seqs: 8
 command: |
     vllm serve {model} \
@@ -31,6 +32,7 @@ command: |
     --port {port} \
     --max-model-len {max_model_len} \
     --gpu-memory-utilization {gpu_memory_utilization} \
+    --max-num-batched-tokens {max_num_batched_tokens} \
     --max-num-seqs {max_num_seqs} \
     --enforce-eager \
     --moe-backend cutlass \

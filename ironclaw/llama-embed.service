@@ -1,0 +1,23 @@
+[Unit]
+Description=llama-server for embedding (nomic-embed-text-v1.5)
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=%U
+EnvironmentFile=%h/.ironclaw/embeddings.conf
+ExecStart=%h/repos/llama.cpp/build/bin/llama-server \
+    --model %E{LLAMA_EMBED_MODEL_PATH} \
+    --ctx-size %E{LLAMA_EMBED_CTX_SIZE} \
+    --port %E{LLAMA_EMBED_PORT} \
+    --host 0.0.0.0 \
+    --embedding \
+    -ngl %E{LLAMA_EMBED_NGL}
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=llama-embed
+
+[Install]
+WantedBy=default.target

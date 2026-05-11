@@ -1,28 +1,21 @@
-# Recipe: Qwen3.6-35B-A3B-FP8 — CUDA graphs (single/dual model mode)
-# Use when running 1 or 2 models simultaneously (not 3)
+# Recipe: Qwen3.6-35B-A3B-FP8 — opencode mode
 # tok/s: ~53.7 | RAM: ~67GB | CUDA graphs: enabled
 recipe_version: "1"
 name: Qwen3.6-35B-A3B-FP8-CUDA
-description: Qwen3.6-35B FP8 with CUDA graphs — max throughput, single/dual model mode (port 8001)
+description: Qwen3.6-35B FP8 with CUDA graphs — opencode coding mode (port 8001)
 
 model: Qwen/Qwen3.6-35B-A3B-FP8
 container: vllm-node
 solo_only: true
 
-# opencode optimize values:
-# gpu_memory_utilization: 0.80
-# max_model_len: 131072
-# max_num_batched_tokens: 65536
-# max_num_seqs: 128
-
 defaults:
   port: 8001
   host: 0.0.0.0
   tensor_parallel: 1
-  gpu_memory_utilization: 0.50
-  max_model_len: 32768
-  max_num_batched_tokens: 32768
-  max_num_seqs: 128
+  gpu_memory_utilization: 0.85
+  max_model_len: 196608
+  max_num_batched_tokens: 65536
+  max_num_seqs: 8
 
 env:
   VLLM_MARLIN_USE_ATOMIC_ADD: 1
@@ -38,9 +31,10 @@ command: |
     --enable-auto-tool-choice \
     --tool-call-parser qwen3_coder \
     --reasoning-parser qwen3 \
+    --chat-template-content-format string \
     --kv-cache-dtype fp8 \
     --load-format fastsafetensors \
     --attention-backend flashinfer \
     --enable-prefix-caching \
     --trust-remote-code \
-    --compilation-config '{{"cudagraph_capture_sizes":[1,2,4,8,16,32,64,128]}}'
+    --compilation-config.cudagraph_capture_sizes [1,2,4,8,16,32,64,128]

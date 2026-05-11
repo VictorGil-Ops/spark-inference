@@ -185,9 +185,29 @@ psql "$DB_URL" -c \
     "INSERT INTO settings (user_id, key, value)
      VALUES ('default', 'safety.max_output_length',       '100000'),
             ('default', 'skills.max_context_tokens',       '28000'),
-            ('default', 'routines.max_lightweight_tokens', '28000')
+            ('default', 'routines.max_lightweight_tokens', '28000'),
+            ('default', 'thinking.max_tokens',             '16384')
      ON CONFLICT (user_id, key) DO UPDATE SET value = EXCLUDED.value;" > /dev/null 2>&1 || true
-ok "context limits: skills/routines max_context=28000, max_output_length=100000"
+ok "context limits: skills/routines max_context=28000, max_output_length=100000, thinking=16384"
+
+# Tools, embedding, thinking — ensure fresh reset has capabilities enabled
+psql "$DB_URL" -c \
+    "INSERT INTO settings (user_id, key, value)
+     VALUES ('default', 'tools.allow_local_tools',     'true'),
+            ('default', 'tools.sandbox_workspace_write','true'),
+            ('default', 'tools.skills_enabled',        'true'),
+             ('default', 'embedding.backend',          '\"openai_compatible\"'),
+             ('default', 'embedding.endpoint',          '\"http://127.0.0.1:8010\"'),
+             ('default', 'embedding.vector_store',      '\"pgvector\"'),
+             ('default', 'embedding.hybrid_search',     'true'),
+             ('default', 'embedding.dimensions',        '768'),
+             ('default', 'embeddings.model',             '\"nomic-embed-text-v1.5-f16.gguf\"'),
+             ('default', 'embeddings.enabled',           'true'),
+             ('default', 'embeddings.provider',          '\"openai\"'),
+            ('default', 'thinking.mode',               '\"auto\"'),
+            ('default', 'thinking.auto_threshold',     '512')
+     ON CONFLICT (user_id, key) DO UPDATE SET value = EXCLUDED.value;" > /dev/null 2>&1 || true
+ok "tools+embedding+thinking enabled (local+pgvector+hybrid+auto-thinking)"
 
 # ── Step 7: Start service ─────────────────────────────────────────────────────
 echo "--- Starting IronClaw ---"

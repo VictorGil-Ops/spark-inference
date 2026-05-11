@@ -1,0 +1,38 @@
+# Recipe: Nemotron-3-Nano-Omni-30B — IronClaw agent mode (NVIDIA official)
+# Full multimodal: Text + Image + Audio + Video
+# Memory: ~96GB | tok/s: ~29-35
+recipe_version: "1"
+name: Nemotron-3-Nano-Omni-30B-NVFP4-Full
+description: Nemotron-Omni official NVIDIA — full multimodal for IronClaw (port 8000)
+
+model: nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4
+container: vllm-node
+solo_only: true
+
+defaults:
+  port: 8007
+  host: 0.0.0.0
+  tensor_parallel: 1
+  gpu_memory_utilization: 0.88
+  max_model_len: 32768
+  max_num_batched_tokens: 32768
+  max_num_seqs: 4
+
+command: |
+  vllm serve nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4 \
+    --host {host} \
+    --port {port} \
+    --max-model-len {max_model_len} \
+    --max-num-batched-tokens {max_num_batched_tokens} \
+    --max-num-seqs {max_num_seqs} \
+    --gpu-memory-utilization {gpu_memory_utilization} \
+    --trust-remote-code \
+    --kv-cache-dtype fp8 \
+    --load-format fastsafetensors \
+    --attention-backend flashinfer \
+    --enable-prefix-caching \
+    --enable-auto-tool-choice \
+    --tool-call-parser hermes \
+    --reasoning-parser nemotron_v3 \
+    --chat-template-content-format string \
+    --moe-backend flashinfer_cutlass

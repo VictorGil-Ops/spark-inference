@@ -71,6 +71,22 @@ ensure_litellm() {
     ok "LiteLLM ready"
 }
 
+ensure_llama_embed() {
+    if systemctl --user is-active --quiet llama-embed; then
+        ok "Embeddings already running"
+        return
+    fi
+    info "Starting embedding server (llama-embed)..."
+    systemctl --user start llama-embed
+    for i in $(seq 1 10); do
+        sleep 1
+        curl -sf http://127.0.0.1:8010/v1/embeddings >/dev/null 2>&1 && break
+    done
+    systemctl --user is-active --quiet llama-embed \
+        && ok "Embeddings running (port 8010)" \
+        || echo "  ✗ llama-embed failed — check: journalctl --user -u llama-embed -n 20"
+}
+
 ensure_ironclaw() {
     if systemctl --user is-active --quiet ironclaw; then
         ok "IronClaw already running"
@@ -171,6 +187,7 @@ auto_recover() {
     fi
 
     echo ""
+    ensure_llama_embed
     ensure_litellm
     ensure_ironclaw
 
@@ -225,6 +242,7 @@ show_menu() {
         1)
             ensure_network
             [ -n "$slug" ] && launch_last_model "$slug" || true
+            ensure_llama_embed
             ensure_litellm
             ensure_ironclaw
             ;;

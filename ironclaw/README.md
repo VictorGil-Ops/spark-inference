@@ -18,14 +18,13 @@ sudo -u postgres createdb ironclaw -O "$(whoami)"
 psql ironclaw -c "CREATE EXTENSION IF NOT EXISTS vector;"
 ```
 
-## Configure
+## Auto-install
 ```bash
-ironclaw onboard
-# Select: PostgreSQL, OpenAI-compatible, vLLM local
-# DB URL: postgres://USER:PASS@localhost:5432/ironclaw?sslmode=disable
-# LLM URL: http://127.0.0.1:8000/v1
-# Model: nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4
+bash ironclaw/setup.sh
+# Or directly:
+bash ironclaw/install.sh <telegram_token> <user_id> [db_user] [db_pass] [model] [hf_model]
 ```
+The installer seeds `.env`, workspace `.md` files, DB settings (tools, embedding, thinking), and imports memories via `ironclaw memory write`.
 
 ## Fix DB settings after onboard
 ```bash
@@ -52,10 +51,10 @@ ironclaw pairing approve telegram CODE
 ```
 
 ## Gotchas
-- After `onboard`, the DB may have `llm_backend = "nearai"` — override it manually (see above).
-- `channels.cli_mode` defaults to `"tui"` in the DB — set `CLI_MODE=plain` in the service to enable log output.
-- `activated_channels` must be set in the DB for WASM channels to load at startup.
 - Only one ironclaw instance can run (PID lock at `~/.ironclaw/ironclaw.pid`).
+- Workspace `.md` files (SOUL.md, USER.md, AGENTS.md, IDENTITY.md) are the source of truth — imported into memory via `ironclaw memory write`.
+- Use `bash ironclaw/reset-ironclaw.sh` to recover from stuck jobs, stale PID, or port conflicts.
+- DB settings control tools (local tools, sandbox), embeddings (pgvector, hybrid), and thinking (auto mode).
 
 ## Benchmarks
 | Query | Response time |
