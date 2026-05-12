@@ -10,6 +10,11 @@ BOLD='\033[1m'
 DIM='\033[2m'
 RESET='\033[0m'
 
+ok()   { printf "  ${GREEN}✓${RESET} %s\n" "$*"; }
+info() { printf "  → %s\n" "$*"; }
+warn() { printf "  ${YELLOW}!${RESET} %s\n" "$*"; }
+ask()  { printf "${CYAN}%s${RESET} " "$*"; }
+
 svc_status() {
     if systemctl --user is-active --quiet "$1" 2>/dev/null; then
         printf "${GREEN}running${RESET}"
