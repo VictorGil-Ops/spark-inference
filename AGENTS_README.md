@@ -27,10 +27,11 @@ Telegram / CLI
 
 The agent uses a role system to adapt its identity, behaviour, and default model to different use cases. Each role provides a set of `.md` files that define the agent's personality, tools, and background tasks.
 
-Roles are stored in `ironclaw/roles/`. Switch roles at any time:
+Roles are stored in `ironclaw/roles/`. Switch roles at any time from the main menu:
 
 ```bash
-./ironclaw/setup.sh role
+bash ~/repos/dev-private-spark-inference/spark.sh
+# [5] Switch Mode → [r] Switch agent role only
 ```
 
 ---
@@ -163,18 +164,18 @@ bash ~/repos/dev-private-spark-inference/ironclaw/reset-ironclaw.sh
 | Security Researcher | foundation-sec | nemotron-super | qwen36 |
 | Researcher | nemotron-super | qwen3.5-122b | qwen36 |
 
-> **Note:** switching roles in `setup.sh` only changes which model IronClaw sends requests to. It does not load or unload models from GB10 unified memory. Use **[2] Models** or **[5] Switch Mode** from the main menu to manage loaded models.
+> **Note:** switching roles only changes which model IronClaw sends requests to. It does not load or unload models from GB10 unified memory. Use **[2] Models** or **[5] Switch Mode** from the main menu to manage loaded models.
 
 ---
 
 ## Switching Roles
 
 ```bash
-# Interactive menu
-./ironclaw/setup.sh role
-
-# Or from the main spark.sh menu → [6] IronClaw Setup → Switch agent role
+bash ~/repos/dev-private-spark-inference/spark.sh
+# [5] Switch Mode → [r] Switch agent role only
 ```
+
+When switching inference profiles with `[5] Switch Mode`, the agent automatically suggests the recommended role for the selected mode (ironclaw → personal-assistant, opencode → developer) and prompts you to apply it.
 
 When switching roles with a different model currently active, the agent will warn you and offer three options:
 1. Switch IronClaw to the recommended model

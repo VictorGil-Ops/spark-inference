@@ -59,12 +59,14 @@ It prints a banner explaining the logical flow (vLLM → LiteLLM → IronClaw �
   [2] Models                launch · unload · download
   [3] Benchmark             tok/s · TTFT · memory usage
   [4] Open WebUI            start browser chat UI
-  [5] Switch Mode           swap inference profile · updates IronClaw + OpenCode
-  [6] IronClaw Setup        install · model · embeddings · role
+  [5] Switch Mode           swap inference profile · role · updates IronClaw + OpenCode
+  [6] IronClaw Setup        install · model · embeddings
   [7] Reset IronClaw        fix stuck services · reimport memory
   ────────────────────────────────────────────────────────────────
   [h] Help
   [q] Quit
+
+  Select:
 ```
 
 ### Step 4 — Install IronClaw (agent + Telegram)

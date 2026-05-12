@@ -141,8 +141,118 @@ print_status() {
 }
 
 # ── Mode switcher ─────────────────────────────────────────────────────────────
+# ── Role helpers ─────────────────────────────────────────────────────────────
+_apply_role() {
+    local role="$1"
+    local ROLES_DIR="$REPO_DIR/ironclaw/roles"
+    local role_dir="$ROLES_DIR/$role"
+
+    if [ ! -d "$role_dir" ]; then
+        warn "Role directory not found: $role_dir"
+        return
+    fi
+
+    local agent_name
+    agent_name=$(grep -i "^\- \*\*Name:\*\*" "$HOME/.ironclaw/workspace/IDENTITY.md" 2>/dev/null \
+        | sed 's/.*Name:\*\* //' || echo "Sparky")
+
+    for f in SOUL.md AGENTS.md HEARTBEAT.md; do
+        src="$role_dir/$f"
+        dst="$HOME/.ironclaw/workspace/$f"
+        if [ -f "$src" ]; then
+            sed "s/{{AGENT_NAME}}/$agent_name/g" "$src" > "$dst"
+            ok "applied $f ($role)"
+        fi
+    done
+
+    sed -i "s/^- \*\*Role:\*\*.*/- **Role:** ${role}/" \
+        "$HOME/.ironclaw/workspace/IDENTITY.md" 2>/dev/null || true
+    ok "updated IDENTITY.md → role: $role"
+
+    for f in SOUL.md IDENTITY.md USER.md AGENTS.md HEARTBEAT.md; do
+        src="$HOME/.ironclaw/workspace/$f"
+        [ -f "$src" ] && ironclaw memory write "$f" "$(cat "$src")" 2>/dev/null && ok "imported $f" || true
+    done
+
+    ironclaw memory write MEMORY.md "# Memory
+
+No entries yet." 2>/dev/null && ok "reset MEMORY.md" || true
+
+    declare -A ROLE_MODEL
+    ROLE_MODEL["personal-assistant"]="gemma-4"
+    ROLE_MODEL["developer"]="qwen36"
+    ROLE_MODEL["ml-engineer"]="nemotron-super"
+    ROLE_MODEL["security"]="foundation-sec"
+    ROLE_MODEL["researcher"]="nemotron-super"
+
+    local role_model="${ROLE_MODEL[$role]:-}"
+    if [ -n "$role_model" ] && [ -f "$HOME/.ironclaw/.env" ]; then
+        set -o allexport; source "$HOME/.ironclaw/.env"; set +o allexport
+        psql "${DATABASE_URL}" -c "
+            INSERT INTO settings (user_id, key, value)
+            VALUES ('default', 'selected_model', '\"${role_model}\"')
+            ON CONFLICT (user_id, key) DO UPDATE SET value = '\"${role_model}\"';
+        " >/dev/null 2>&1 && ok "IronClaw model → $role_model" || true
+    fi
+}
+
+_switch_role_inline() {
+    local ROLES_DIR="$REPO_DIR/ironclaw/roles"
+    mapfile -t ROLES < <(find "$ROLES_DIR" -mindepth 1 -maxdepth 1 -type d | sort | xargs -I{} basename {})
+
+    local current_role=""
+    current_role=$(grep -i "^\- \*\*Role:\*\*" "$HOME/.ironclaw/workspace/IDENTITY.md" 2>/dev/null \
+        | sed 's/.*Role:\*\* //' | tr -d '[:space:]' || true)
+
+    declare -A ROLE_DESC
+    ROLE_DESC["personal-assistant"]="Reminders, notes, news, monitoring    [gemma-4]"
+    ROLE_DESC["developer"]="Coding, architecture, GitHub, shell    [qwen36]"
+    ROLE_DESC["ml-engineer"]="Models, experiments, inference infra   [nemotron-super]"
+    ROLE_DESC["security"]="Threat modeling, CVEs, code audit      [foundation-sec]"
+    ROLE_DESC["researcher"]="Papers, synthesis, long-context        [nemotron-super]"
+
+    printf "\n${BOLD}=== Switch Agent Role ===${RESET}\n\n"
+    [ -n "$current_role" ] && printf "  Current: ${GREEN}%s${RESET}\n\n" "$current_role"
+
+    for i in "${!ROLES[@]}"; do
+        local role="${ROLES[$i]}"
+        local desc="${ROLE_DESC[$role]:-}"
+        if [ "$role" = "$current_role" ]; then
+            printf "  ${GREEN}●${RESET} [%s] %-22s %s  ${CYAN}← current${RESET}\n" "$((i+1))" "$role" "$desc"
+        else
+            printf "    [%s] %-22s %s\n" "$((i+1))" "$role" "$desc"
+        fi
+    done
+
+    echo ""
+    echo "  [q] Cancel"
+    echo ""
+    ask "Select role (1-${#ROLES[@]}):"
+    read -r sel
+    [[ "${sel,,}" == "q" ]] && return
+    if ! [[ "$sel" =~ ^[0-9]+$ ]] || [ "$sel" -lt 1 ] || [ "$sel" -gt "${#ROLES[@]}" ]; then
+        echo "  Invalid."; return
+    fi
+
+    local chosen="${ROLES[$((sel-1))]}"
+    _apply_role "$chosen"
+
+    info "Restarting IronClaw..."
+    systemctl --user restart ironclaw 2>/dev/null
+    sleep 3
+    systemctl --user is-active --quiet ironclaw \
+        && ok "IronClaw running with role: $chosen" \
+        || warn "IronClaw failed — check: journalctl --user -u ironclaw -n 20"
+}
+
+# ── Mode switcher ─────────────────────────────────────────────────────────────
 switch_mode() {
     local RECIPES_DIR="$REPO_DIR/recipes"
+
+    # Default role per mode directory
+    declare -A MODE_DEFAULT_ROLE
+    MODE_DEFAULT_ROLE["ironclaw"]="personal-assistant"
+    MODE_DEFAULT_ROLE["opencode"]="developer"
 
     mapfile -t MODES < <(
         find "$RECIPES_DIR" -mindepth 1 -maxdepth 1 -type d | while read -r d; do
@@ -194,16 +304,47 @@ print(m.group(1) if m else '?')
         echo ""
     done
 
+    echo "  [r] Switch agent role only (keep current inference profile)"
     echo "  [q] Cancel"
     echo ""
     read -rp "  Select recipe (1-${#RECIPE_FILES[@]}): " sel
     [[ "${sel,,}" == "q" ]] && return
+    if [[ "${sel,,}" == "r" ]]; then
+        _switch_role_inline
+        return
+    fi
     if ! [[ "$sel" =~ ^[0-9]+$ ]] || [ "$sel" -lt 1 ] || [ "$sel" -gt "${#RECIPE_FILES[@]}" ]; then
         echo "  Invalid."; return
     fi
 
     local chosen_file="${RECIPE_FILES[$((sel-1))]}"
     local chosen_label="${RECIPE_LABELS[$((sel-1))]}"
+
+    # ── Role suggestion ───────────────────────────────────────────────────────
+    local mode_dir_sel
+    mode_dir_sel=$(dirname "$chosen_file" | xargs basename)
+    local suggested_role="${MODE_DEFAULT_ROLE[$mode_dir_sel]:-}"
+    local current_role=""
+    current_role=$(grep -i "^\- \*\*Role:\*\*" "$HOME/.ironclaw/workspace/IDENTITY.md" 2>/dev/null \
+        | sed 's/.*Role:\*\* //' | tr -d '[:space:]' || true)
+
+    if [ -n "$suggested_role" ] && [ "$suggested_role" != "$current_role" ]; then
+        echo ""
+        printf "  ${CYAN}Suggested role for %s mode:${RESET} ${BOLD}%s${RESET}\n" "$mode_dir_sel" "$suggested_role"
+        [ -n "$current_role" ] && printf "  Current role: %s\n" "$current_role"
+        echo ""
+        echo "  [1] Switch role to $suggested_role"
+        echo "  [2] Keep current role ($current_role)"
+        echo ""
+        ask "Select [1]:"
+        read -r role_action
+        role_action="${role_action:-1}"
+        if [ "$role_action" = "1" ]; then
+            _apply_role "$suggested_role"
+        fi
+    elif [ -n "$suggested_role" ] && [ "$suggested_role" = "$current_role" ]; then
+        printf "  ${DIM}Role already set to %s — no change needed.${RESET}\n" "$current_role"
+    fi
 
     local model port image env_flag cmd slug
     slug=$(basename "$chosen_file" .yaml)
@@ -418,8 +559,8 @@ print_menu() {
     printf "  ${BOLD}[2]${RESET} Models                ${DIM}launch · unload · download${RESET}\n"
     printf "  ${BOLD}[3]${RESET} Benchmark             ${DIM}tok/s · TTFT · memory usage${RESET}\n"
     printf "  ${BOLD}[4]${RESET} Open WebUI            ${DIM}start browser chat UI${RESET}\n"
-    printf "  ${BOLD}[5]${RESET} Switch Mode           ${DIM}swap inference profile · updates IronClaw + OpenCode${RESET}\n"
-    printf "  ${BOLD}[6]${RESET} IronClaw Setup        ${DIM}install · model · embeddings · role${RESET}\n"
+    printf "  ${BOLD}[5]${RESET} Switch Mode           ${DIM}swap inference profile · role · updates IronClaw + OpenCode${RESET}\n"
+    printf "  ${BOLD}[6]${RESET} IronClaw Setup        ${DIM}install · model · embeddings${RESET}\n"
     printf "  ${BOLD}[7]${RESET} Reset IronClaw        ${DIM}fix stuck services · reimport memory${RESET}\n"
     echo "  ────────────────────────────────────────────────────────────────"
     printf "  ${BOLD}[h]${RESET} Help\n"
@@ -459,11 +600,13 @@ show_help() {
     printf "  ${BOLD}[5] Switch Mode${RESET}\n"
     echo "      Switches between inference profiles:"
     echo "      · ironclaw — models tuned for the IronClaw agent (tool calling,"
-    echo "        reasoning, Telegram). Also updates IronClaw's active model."
+    echo "        reasoning, Telegram). Suggests personal-assistant role."
     echo "      · opencode — models tuned for coding (CUDA graphs, prefix cache,"
-    echo "        high throughput). Also writes ~/.config/opencode/opencode.json."
+    echo "        high throughput). Suggests developer role."
+    echo "      Also updates IronClaw's active model and opencode.json."
     echo "      Stops the running model container (25s graceful timeout) before"
     echo "      starting the new one."
+    echo "      [r] Switch agent role only — change role without swapping model."
     echo ""
     printf "  ${BOLD}[6] IronClaw Setup${RESET}  ${DIM}setup.sh${RESET}\n"
     echo "      Full IronClaw management menu:"
