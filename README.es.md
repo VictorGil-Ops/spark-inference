@@ -45,19 +45,26 @@ Muestra un banner con el flujo lógico (vLLM → LiteLLM → IronClaw → WebUI)
   ║     NVIDIA GB10 · 128 GB unified · SM12.1 Blackwell         ║
   ╚══════════════════════════════════════════════════════════════╝
 
-  System    57GB / 122GB RAM used  (65GB free)
-  Models    vllm_nemotron3_nano_nvfp4_w4a16
+  System    109GB / 122GB RAM used  (13GB free)
+  Storage   638GB / 915GB used  (231GB free)
+  Models    vllm_ironclaw_iron_gemma_4_26b_nvfp4
+  Embedding running    port 8010 (warmup)
   LiteLLM   running
-  IronClaw  running
-  WebUI     running  → http://localhost:3000
-  Watchdog  enabled  (fires 5 min after boot)
+  IronClaw  running  · role: developer
+  PostgreSQL  running  (ironclaw@5432)
+  WebUI     running  → http://localhost:3001
 
-  [1] Recovery & Watchdog   start-all.sh
-  [2] Models                run.sh  (launch · unload · download)
-  [3] Benchmark             benchmark.sh
-  [4] Open WebUI            webui.sh
-  [5] IronClaw Setup        setup.sh  (install · change model)
-  [6] Reset IronClaw        reset-ironclaw.sh
+  ────────────────────────────────────────────────────────────────
+  [1] Recovery & Watchdog   start all services · enable boot watchdog
+  [2] Models                launch · unload · download
+  [3] Benchmark             tok/s · TTFT · memory usage
+  [4] Open WebUI            start browser chat UI
+  [5] Switch Mode           swap inference profile · updates IronClaw + OpenCode
+  [6] IronClaw Setup        install · model · embeddings · role
+  [7] Reset IronClaw        fix stuck services · reimport memory
+  ────────────────────────────────────────────────────────────────
+  [h] Help
+  [q] Quit
 ```
 
 ### Paso 4 — Instalar IronClaw (agente + Telegram)
