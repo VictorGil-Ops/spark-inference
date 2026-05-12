@@ -297,6 +297,153 @@ EOF
 chmod 600 ~/.ironclaw/.env
 echo "  ✓ .env created"
 
+# ── Onboarding questionnaire ──────────────────────────────────────────────────
+run_onboarding() {
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "  Agent Onboarding"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "  Customize your agent now, or skip and edit the"
+    echo "  workspace .md files manually later."
+    echo ""
+    echo "  [Y] Run onboarding questionnaire"
+    echo "  [n] Skip"
+    echo ""
+    printf "  Select: "
+    read -r do_onboard
+    [[ "${do_onboard,,}" == "n" ]] && echo "  Skipped. Edit ~/.ironclaw/workspace/ to customize." && return
+
+    echo ""
+
+    # Agent name
+    printf "  Agent name [Sparky]: "
+    read -r AGENT_NAME
+    AGENT_NAME="${AGENT_NAME:-Sparky}"
+
+    # User name
+    printf "  Your name: "
+    read -r USER_NAME
+    USER_NAME="${USER_NAME:-User}"
+
+    # Location
+    printf "  Your location (city, country): "
+    read -r USER_LOCATION
+    USER_LOCATION="${USER_LOCATION:-Unknown}"
+
+    # Role selection
+    echo ""
+    echo "  Select agent role:"
+    echo "    [1] Personal Assistant  — reminders, notes, news, system monitoring"
+    echo "    [2] Software Developer  — coding, architecture, GitHub, shell"
+    echo "    [3] AI/ML Engineer      — models, experiments, inference infrastructure"
+    echo "    [4] Security Researcher — threat analysis, foundation-sec, primus"
+    echo "    [5] Researcher          — papers, synthesis, long-context, rigor"
+    echo ""
+    printf "  Select role [1]: "
+    read -r ROLE_SEL
+    ROLE_SEL="${ROLE_SEL:-1}"
+
+    case "$ROLE_SEL" in
+        1) ROLE="personal-assistant" ; DEFAULT_MODEL="gemma-4" ;;
+        2) ROLE="developer"          ; DEFAULT_MODEL="qwen36" ;;
+        3) ROLE="ml-engineer"        ; DEFAULT_MODEL="nemotron-super" ;;
+        4) ROLE="security"           ; DEFAULT_MODEL="foundation-sec" ;;
+        5) ROLE="researcher"         ; DEFAULT_MODEL="nemotron-super" ;;
+        *) ROLE="personal-assistant" ; DEFAULT_MODEL="gemma-4" ;;
+    esac
+
+    # Preferred language
+    echo ""
+    echo "  Preferred language:"
+    echo "    [1] English"
+    echo "    [2] Spanish"
+    echo "    [3] Other (you'll edit SOUL.md manually)"
+    echo ""
+    printf "  Select [1]: "
+    read -r LANG_SEL
+    case "${LANG_SEL:-1}" in
+        2) PREFERRED_LANG="Spanish" ;;
+        3) PREFERRED_LANG="your preferred language" ;;
+        *) PREFERRED_LANG="English" ;;
+    esac
+
+    echo ""
+    echo "  Summary:"
+    echo "    Agent:    $AGENT_NAME"
+    echo "    User:     $USER_NAME"
+    echo "    Location: $USER_LOCATION"
+    echo "    Role:     $ROLE"
+    echo "    Model:    $DEFAULT_MODEL"
+    echo "    Language: $PREFERRED_LANG"
+    echo ""
+    printf "  Apply? [Y/n]: "
+    read -r confirm
+    [[ "${confirm,,}" == "n" ]] && echo "  Aborted." && return
+
+    # Apply role .md files to workspace
+    ROLE_DIR="$REPO_DIR/ironclaw/roles/$ROLE"
+    if [ -d "$ROLE_DIR" ]; then
+        for f in SOUL.md AGENTS.md HEARTBEAT.md; do
+            src="$ROLE_DIR/$f"
+            dst="$HOME/.ironclaw/workspace/$f"
+            if [ -f "$src" ]; then
+                sed "s/{{AGENT_NAME}}/$AGENT_NAME/g" "$src" > "$dst"
+                echo "  → applied $f from role $ROLE"
+            fi
+        done
+    else
+        echo "  ! Role directory not found: $ROLE_DIR — using base workspace"
+    fi
+
+    # Update USER.md with real values
+    cat > "$HOME/.ironclaw/workspace/USER.md" << USEREOF
+# User
+
+- **Name:** ${USER_NAME}
+- **Location:** ${USER_LOCATION}
+- **Main machine:** $(hostname) (DGX Spark GB10)
+- **Stack:** Rust, Python, local AI infrastructure
+- **Preferences:** direct answers, no padding, no hand-holding
+
+## Context
+- Runs local LLM inference on a DGX Spark.
+- Uses IronClaw as a personal AI agent via Telegram.
+- Agent role: ${ROLE}
+- Preferred language: ${PREFERRED_LANG}
+USEREOF
+    echo "  → updated USER.md"
+
+    # Update IDENTITY.md with agent name
+    cat > "$HOME/.ironclaw/workspace/IDENTITY.md" << IDENTEOF
+# Identity
+
+- **Name:** ${AGENT_NAME}
+- **Vibe:** direct, sharp, no fluff. Gets to the point.
+- **Emoji:** ⚡
+- **Role:** ${ROLE}
+
+## Personality
+- Doesn't pad. If the answer is one word, gives one word.
+- Has its own opinions. Pushes back when it matters.
+- Responds in ${PREFERRED_LANG} by default.
+IDENTEOF
+    echo "  → updated IDENTITY.md"
+
+    # Set default model in DB
+    if [ -n "$DEFAULT_MODEL" ]; then
+        DB_URL="postgres://${DB_USER}:${DB_PASS}@localhost:5432/${DB_NAME}?sslmode=disable"
+        psql "$DB_URL" -c "
+            INSERT INTO settings (user_id, key, value)
+            VALUES ('default', 'selected_model', '\"${DEFAULT_MODEL}\"')
+            ON CONFLICT (user_id, key) DO UPDATE SET value = '\"${DEFAULT_MODEL}\"';
+        " > /dev/null 2>&1 && echo "  → default model set to $DEFAULT_MODEL" || true
+    fi
+
+    echo ""
+    echo "  ✓ Onboarding complete"
+}
+
 # Workspace — identity and personality files
 echo "  → Setting up workspace..."
 mkdir -p ~/.ironclaw/workspace
@@ -412,6 +559,7 @@ Use the setup wizard:
 AGENTS_EOF
 
 echo "  ✓ Workspace ready at ~/.ironclaw/workspace/"
+run_onboarding
 
 # ── 6. DB migrations + config + start ────────────────────────────────────
 echo ""
@@ -424,7 +572,7 @@ export $(grep -v '^#' ~/.ironclaw/.env | xargs)
 timeout 30 ironclaw run --no-onboard 2>/dev/null || true
 
 echo "  → Importing workspace files into memory..."
-for f in IDENTITY.md SOUL.md USER.md AGENTS.md; do
+for f in SOUL.md IDENTITY.md USER.md AGENTS.md; do
     src="$HOME/.ironclaw/workspace/$f"
     if [ -f "$src" ]; then
         ironclaw memory write "$f" "$(cat "$src")" 2>/dev/null \
@@ -432,6 +580,16 @@ for f in IDENTITY.md SOUL.md USER.md AGENTS.md; do
             || echo "    ! $f failed (will retry on restart)"
     fi
 done
+
+# Reset MEMORY.md — prevents stale onboarding summaries from overriding identity
+ironclaw memory write MEMORY.md "# Memory
+
+No entries yet." 2>/dev/null && echo "    → reset MEMORY.md" || true
+
+# Remove auto-generated profile if it conflicts with USER.md
+ironclaw memory write context/profile.json "{}" 2>/dev/null && echo "    → reset context/profile.json" || true
+
+echo "  ✓ Memory initialized"
 
 echo "  → Configuring DB settings..."
 DB_URL="postgres://${DB_USER}:${DB_PASS}@localhost:5432/${DB_NAME}?sslmode=disable"

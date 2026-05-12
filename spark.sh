@@ -22,32 +22,35 @@ svc_status() {
 
 # ── Banner ────────────────────────────────────────────────────────────────────
 print_banner() {
+    local VERSION
+    VERSION=$(cat "$REPO_DIR/VERSION" 2>/dev/null || echo "dev")
     printf "${BOLD}"
     echo "  ╔══════════════════════════════════════════════════════════════╗"
-    echo "  ║           DGX Spark — Personal Inference Stack              ║"
-    echo "  ║     NVIDIA GB10 · 128 GB unified · SM12.1 Blackwell         ║"
+    echo "  ║        DGX Spark — Personal Inference Stack                  ║"
+    echo "  ║    NVIDIA GB10 · 128 GB unified · SM12.1 Blackwell           ║"
+    printf "  ║    v%-10s  ${YELLOW}⚠ PoC — may contain bugs${RESET}${BOLD}                     ║\n" "$VERSION"
     echo "  ╚══════════════════════════════════════════════════════════════╝"
     printf "${RESET}"
     echo ""
     printf "${DIM}"
     echo "  LOGICAL FLOW"
     echo "  ────────────────────────────────────────────────────────────────"
-    echo "  1. vLLM models     Serve local LLMs (ports 8000-8004)."
-    echo "                     Each recipe is a YAML in recipes/ — launch"
-    echo "                     with run.sh, stop to free RAM."
+    echo "  1. Inference     vLLM serves local LLMs."
+    echo "                   Recipes in recipes/ironclaw/ or recipes/opencode/"
+    echo "                   Switch mode with [5] to swap profiles."
     echo ""
-    echo "  2. LiteLLM proxy   Single OpenAI-compatible endpoint (port 4000)."
-    echo "                     Routes by model name to the right vLLM port."
-    echo "                     IronClaw and Open WebUI both point here."
+    echo "  2. LiteLLM       Single OpenAI-compatible endpoint (port 4000)."
+    echo "                   Routes by model name to the right backend."
+    echo "                   IronClaw and Open WebUI both point here."
     echo ""
-    echo "  3. IronClaw        AI agent with Telegram + CLI. Uses LiteLLM"
-    echo "                     to pick a model. Change active model with"
-    echo "                     setup.sh — updates DB + .env + last_model."
+    echo "  3. IronClaw      AI agent — Telegram + CLI. Role-based identity"
+    echo "                   (personal assistant, developer, ML engineer,"
+    echo "                   security, researcher). Manage with [6]."
     echo ""
-    echo "  4. Open WebUI      Browser chat UI at localhost:3000."
-    echo "                     Connects to LiteLLM proxy."
+    echo "  4. Open WebUI    Browser chat UI. Connects to LiteLLM proxy."
     echo ""
     echo "  AFTER REBOOT  →  run Recovery [1] or let the watchdog handle it."
+    echo "  HELP          →  press [h] for option descriptions."
     echo "  ────────────────────────────────────────────────────────────────"
     printf "${RESET}"
 }
@@ -99,7 +102,20 @@ print_status() {
     fi
 
     printf "  ${BOLD}LiteLLM${RESET}   %s\n"   "$(svc_status litellm)"
-    printf "  ${BOLD}IronClaw${RESET}  %s\n"   "$(svc_status ironclaw)"
+    # Read active role from IDENTITY.md
+    local ironclaw_role=""
+    ironclaw_role=$(grep -i "^\- \*\*Role:\*\*" "$HOME/.ironclaw/workspace/IDENTITY.md" 2>/dev/null \
+        | sed 's/.*Role:\*\* //' | tr -d '[:space:]' || true)
+
+    if systemctl --user is-active --quiet ironclaw 2>/dev/null; then
+        if [ -n "$ironclaw_role" ]; then
+            printf "  ${BOLD}IronClaw${RESET}  ${GREEN}running${RESET}  · role: ${CYAN}%s${RESET}\n" "$ironclaw_role"
+        else
+            printf "  ${BOLD}IronClaw${RESET}  ${GREEN}running${RESET}\n"
+        fi
+    else
+        printf "  ${BOLD}IronClaw${RESET}  ${DIM}stopped${RESET}\n"
+    fi
     printf "  ${BOLD}PostgreSQL${RESET}  %s  (ironclaw@5432)\n" "$(svc_status postgresql)"
 
     # Open WebUI
@@ -398,16 +414,86 @@ PYEOF
 # ── Menu ──────────────────────────────────────────────────────────────────────
 print_menu() {
     echo "  ────────────────────────────────────────────────────────────────"
-    printf "  ${BOLD}[1]${RESET} Recovery & Watchdog   ${DIM}start-all.sh${RESET}\n"
-    printf "  ${BOLD}[2]${RESET} Models                ${DIM}run.sh  (launch · unload · download)${RESET}\n"
-    printf "  ${BOLD}[3]${RESET} Benchmark             ${DIM}benchmark.sh${RESET}\n"
-    printf "  ${BOLD}[4]${RESET} Open WebUI            ${DIM}webui.sh${RESET}\n"
-    printf "  ${BOLD}[5]${RESET} Switch Mode           ${DIM}ironclaw · opencode${RESET}\n"
-    printf "  ${BOLD}[6]${RESET} IronClaw Setup        ${DIM}setup.sh  (install · change model)${RESET}\n"
-    printf "  ${BOLD}[7]${RESET} Reset IronClaw        ${DIM}reset-ironclaw.sh${RESET}\n"
+    printf "  ${BOLD}[1]${RESET} Recovery & Watchdog   ${DIM}start all services · enable boot watchdog${RESET}\n"
+    printf "  ${BOLD}[2]${RESET} Models                ${DIM}launch · unload · download${RESET}\n"
+    printf "  ${BOLD}[3]${RESET} Benchmark             ${DIM}tok/s · TTFT · memory usage${RESET}\n"
+    printf "  ${BOLD}[4]${RESET} Open WebUI            ${DIM}start browser chat UI${RESET}\n"
+    printf "  ${BOLD}[5]${RESET} Switch Mode           ${DIM}swap inference profile · updates IronClaw + OpenCode${RESET}\n"
+    printf "  ${BOLD}[6]${RESET} IronClaw Setup        ${DIM}install · model · embeddings · role${RESET}\n"
+    printf "  ${BOLD}[7]${RESET} Reset IronClaw        ${DIM}fix stuck services · reimport memory${RESET}\n"
     echo "  ────────────────────────────────────────────────────────────────"
+    printf "  ${BOLD}[h]${RESET} Help\n"
     printf "  ${BOLD}[q]${RESET} Quit\n"
     echo ""
+}
+
+# ── Help ──────────────────────────────────────────────────────────────────────
+show_help() {
+    clear
+    printf "${BOLD}"
+    echo "  ╔══════════════════════════════════════════════════════════════╗"
+    echo "  ║                        Help                                  ║"
+    echo "  ╚══════════════════════════════════════════════════════════════╝"
+    printf "${RESET}"
+    echo ""
+    printf "  ${BOLD}[1] Recovery & Watchdog${RESET}  ${DIM}start-all.sh${RESET}\n"
+    echo "      Starts all services in the correct order after a reboot:"
+    echo "      LiteLLM proxy, last loaded model, IronClaw, Open WebUI."
+    echo "      Also installs/enables the watchdog timer that auto-recovers"
+    echo "      services 5 minutes after boot."
+    echo ""
+    printf "  ${BOLD}[2] Models${RESET}  ${DIM}run.sh${RESET}\n"
+    echo "      Interactive model manager. Launch a recipe (starts the vLLM"
+    echo "      container), unload a running model to free RAM, or download"
+    echo "      a model from HuggingFace. Shows RAM usage and tok/s per model."
+    echo ""
+    printf "  ${BOLD}[3] Benchmark${RESET}  ${DIM}benchmark.sh${RESET}\n"
+    echo "      Runs throughput and latency benchmarks against the currently"
+    echo "      running model. Outputs tok/s, TTFT, and memory usage."
+    echo ""
+    printf "  ${BOLD}[4] Open WebUI${RESET}  ${DIM}webui.sh${RESET}\n"
+    echo "      Starts or restarts the Open WebUI Docker container."
+    echo "      Connects to LiteLLM on port 4000 — all registered models"
+    echo "      are available in the browser UI."
+    echo ""
+    printf "  ${BOLD}[5] Switch Mode${RESET}\n"
+    echo "      Switches between inference profiles:"
+    echo "      · ironclaw — models tuned for the IronClaw agent (tool calling,"
+    echo "        reasoning, Telegram). Also updates IronClaw's active model."
+    echo "      · opencode — models tuned for coding (CUDA graphs, prefix cache,"
+    echo "        high throughput). Also writes ~/.config/opencode/opencode.json."
+    echo "      Stops the running model container (25s graceful timeout) before"
+    echo "      starting the new one."
+    echo ""
+    printf "  ${BOLD}[6] IronClaw Setup${RESET}  ${DIM}setup.sh${RESET}\n"
+    echo "      Full IronClaw management menu:"
+    echo "      · Fresh install — PostgreSQL, pgvector, IronClaw binary, .env,"
+    echo "        workspace .md files, Telegram bot, systemd service."
+    echo "      · Change default LLM model — updates DB + .env + last_model."
+    echo "      · Configure embeddings — local llama.cpp or NEAR AI cloud."
+    echo "      · Manage inference models — start/stop vLLM or Atlas containers."
+    echo "      · Switch agent role — personal assistant, developer, ML engineer,"
+    echo "        security researcher, or researcher. Applies role-specific .md"
+    echo "        files and sets the recommended model."
+    echo ""
+    printf "  ${BOLD}[7] Reset IronClaw${RESET}  ${DIM}reset-ironclaw.sh${RESET}\n"
+    echo "      Fixes common IronClaw issues without reinstalling:"
+    echo "      · Stale PID file, crashed service, stuck jobs"
+    echo "      · PostgreSQL SSL issues"
+    echo "      · LiteLLM not responding"
+    echo "      · Telegram not receiving messages"
+    echo "      · Reimports workspace .md files into ironclaw memory"
+    echo "      · Verifies selected_model matches a registered LiteLLM model"
+    echo ""
+    printf "  ${BOLD}Status bar explained:${RESET}\n"
+    echo "      Models    — running vLLM/Atlas containers"
+    echo "      Embedding — llama.cpp embedding server (port 8010)"
+    echo "      LiteLLM   — OpenAI-compatible proxy (port 4000)"
+    echo "      IronClaw  — AI agent daemon (Telegram + CLI)"
+    echo "      PostgreSQL — IronClaw database (port 5432)"
+    echo "      WebUI     — Open WebUI browser interface"
+    echo ""
+    read -rp "  Press Enter to return to menu..." _
 }
 
 # ── Main loop ─────────────────────────────────────────────────────────────────
@@ -427,6 +513,7 @@ while true; do
         5) switch_mode ;;
         6) bash "$REPO_DIR/ironclaw/setup.sh" ;;
         7) bash "$REPO_DIR/ironclaw/reset-ironclaw.sh" ;;
+        h|H) show_help; continue ;;
         q|Q) echo "  Bye."; break ;;
         *) echo "  Invalid." ;;
     esac

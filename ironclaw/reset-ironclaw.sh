@@ -334,7 +334,7 @@ fi
 
 # ── Step N: Reimport workspace files into ironclaw memory ────────────────────
 echo "--- Reimporting workspace into ironclaw memory ---"
-for f in IDENTITY.md SOUL.md USER.md AGENTS.md; do
+for f in SOUL.md IDENTITY.md USER.md AGENTS.md; do
     src="$HOME/.ironclaw/workspace/$f"
     if [ -f "$src" ]; then
         ironclaw memory write "$f" "$(cat "$src")" 2>/dev/null \
@@ -344,6 +344,12 @@ for f in IDENTITY.md SOUL.md USER.md AGENTS.md; do
         fail "$f not found at $src"
     fi
 done
+
+# Reset stale onboarding artifacts
+ironclaw memory write MEMORY.md "# Memory
+
+No entries yet." 2>/dev/null && ok "reset MEMORY.md" || true
+ironclaw memory write context/profile.json "{}" 2>/dev/null && ok "reset context/profile.json" || true
 
 echo ""
 echo "=== Done ==="

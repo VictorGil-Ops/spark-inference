@@ -4,6 +4,7 @@
 #        ./ironclaw/setup.sh model       — change default model directly
 #        ./ironclaw/setup.sh embeddings  — configure embeddings directly
 #        ./ironclaw/setup.sh models      — manage inference models
+#        ./ironclaw/setup.sh role        — switch agent role directly
 
 set -e
 
@@ -1002,9 +1003,235 @@ uninstall() {
 }
 
 # ── Main menu ─────────────────────────────────────────────────────────────────
+# ── Switch agent role ─────────────────────────────────────────────────────────
+switch_role() {
+    local ROLES_DIR="$REPO_DIR/ironclaw/roles"
+
+    if [ ! -d "$ROLES_DIR" ]; then
+        echo "  No roles directory found at $ROLES_DIR"
+        return
+    fi
+
+    mapfile -t ROLES < <(find "$ROLES_DIR" -mindepth 1 -maxdepth 1 -type d | sort | xargs -I{} basename {})
+
+    if [ ${#ROLES[@]} -eq 0 ]; then
+        echo "  No roles found in $ROLES_DIR"
+        return
+    fi
+
+    # Detect current role from IDENTITY.md
+    local current_role=""
+    current_role=$(grep -i "^- \*\*Role:\*\*" ~/.ironclaw/workspace/IDENTITY.md 2>/dev/null | sed 's/.*Role:\*\* //' || true)
+
+    printf "\n${BOLD}=== Switch Agent Role ===${RESET}\n\n"
+    [ -n "$current_role" ] && printf "  Current: ${GREEN}%s${RESET}\n\n" "$current_role"
+
+    # Role descriptions
+    declare -A ROLE_DESC
+    ROLE_DESC["personal-assistant"]="Reminders, notes, news, system monitoring   [gemma-4]"
+    ROLE_DESC["developer"]="Coding, architecture, GitHub, shell         [qwen36]"
+    ROLE_DESC["ml-engineer"]="Models, experiments, inference infra        [nemotron-super]"
+    ROLE_DESC["security"]="Threat modeling, CVEs, code audit           [foundation-sec]"
+    ROLE_DESC["researcher"]="Papers, synthesis, long-context analysis    [nemotron-super]"
+
+    # Role default models
+    declare -A ROLE_MODEL
+    ROLE_MODEL["personal-assistant"]="gemma-4"
+    ROLE_MODEL["developer"]="qwen36"
+    ROLE_MODEL["ml-engineer"]="nemotron-super"
+    ROLE_MODEL["security"]="foundation-sec"
+    ROLE_MODEL["researcher"]="nemotron-super"
+
+    for i in "${!ROLES[@]}"; do
+        local role="${ROLES[$i]}"
+        local desc="${ROLE_DESC[$role]:-no description}"
+        if [ "$role" = "$current_role" ]; then
+            printf "  ${GREEN}●${RESET} [%s] %-22s %s  ${CYAN}← current${RESET}\n" "$((i+1))" "$role" "$desc"
+        else
+            printf "    [%s] %-22s %s\n" "$((i+1))" "$role" "$desc"
+        fi
+    done
+
+    echo ""
+    echo "  [q] Cancel"
+    echo ""
+    ask "Select role (1-${#ROLES[@]}):"
+    read -r sel
+    [[ "${sel,,}" == "q" ]] && return
+    if ! [[ "$sel" =~ ^[0-9]+$ ]] || [ "$sel" -lt 1 ] || [ "$sel" -gt "${#ROLES[@]}" ]; then
+        echo "  Invalid."; return
+    fi
+
+    local chosen="${ROLES[$((sel-1))]}"
+    local chosen_model="${ROLE_MODEL[$chosen]:-}"
+    local role_dir="$ROLES_DIR/$chosen"
+
+    # Ask for agent name — keep current if already set
+    local current_name
+    current_name=$(grep -i "^\- \*\*Name:\*\*" ~/.ironclaw/workspace/IDENTITY.md 2>/dev/null | sed 's/.*Name:\*\* //' || echo "Sparky")
+    printf "\n  Agent name [%s]: " "$current_name"
+    read -r new_name
+    local agent_name="${new_name:-$current_name}"
+
+    echo ""
+    printf "  Switching to: ${BOLD}%s${RESET} (model: %s)\n\n" "$chosen" "$chosen_model"
+
+    # Apply role .md files
+    for f in SOUL.md AGENTS.md HEARTBEAT.md; do
+        src="$role_dir/$f"
+        dst="$HOME/.ironclaw/workspace/$f"
+        if [ -f "$src" ]; then
+            sed "s/{{AGENT_NAME}}/$agent_name/g" "$src" > "$dst"
+            ok "applied $f"
+        fi
+    done
+
+    # Update IDENTITY.md role field
+    if [ -f "$HOME/.ironclaw/workspace/IDENTITY.md" ]; then
+        sed -i "s/^- \*\*Role:\*\*.*/- **Role:** ${chosen}/" \
+            "$HOME/.ironclaw/workspace/IDENTITY.md" 2>/dev/null || true
+        sed -i "s/^- \*\*Name:\*\*.*/- **Name:** ${agent_name}/" \
+            "$HOME/.ironclaw/workspace/IDENTITY.md" 2>/dev/null || true
+        ok "updated IDENTITY.md"
+    fi
+
+    # Reimport all workspace files into ironclaw memory
+    for f in SOUL.md IDENTITY.md USER.md AGENTS.md HEARTBEAT.md; do
+        src="$HOME/.ironclaw/workspace/$f"
+        [ -f "$src" ] && ironclaw memory write "$f" "$(cat "$src")" 2>/dev/null && ok "imported $f" || true
+    done
+
+    # Reset MEMORY.md to avoid stale context from previous role
+    ironclaw memory write MEMORY.md "# Memory
+
+No entries yet." 2>/dev/null && ok "reset MEMORY.md" || true
+
+    # ── Model conflict detection ──────────────────────────────────────────────────
+    if [ -n "$chosen_model" ]; then
+        local running_container running_slug
+        running_container=$(docker ps --format '{{.Names}}' 2>/dev/null | grep -E '^(vllm|atlas)-' | head -1 || true)
+        running_slug=$(echo "$running_container" | sed 's/^vllm-//;s/^atlas-//')
+
+        local running_model=""
+        if [ -f "$HOME/.ironclaw/last_model" ]; then
+            running_model=$(cat "$HOME/.ironclaw/last_model" | tr -d '[:space:]')
+        fi
+
+        local running_alias=""
+        if [ -n "$running_model" ]; then
+            running_alias=$(python3 -c "
+import re, sys, os
+try:
+    raw = open('$HOME/.litellm/litellm_config.yaml').read()
+    recipes_dir = '$REPO_DIR/recipes'
+    for root, dirs, files in os.walk(recipes_dir):
+        for f in files:
+            if not f.endswith('.yaml'): continue
+            rpath = os.path.join(root, f)
+            slug = f[:-5].replace('-','_').replace('.','_')
+            if slug in '$running_model'.replace('-','_').replace('.','_'):
+                rcontent = open(rpath).read()
+                m = re.search(r'port:\s*(\d+)', rcontent)
+                if m:
+                    port = m.group(1)
+                    nm = re.search(r'model_name:\s*(\S+)(?=.*api_base.*:' + port + ')', raw, re.DOTALL)
+                    if nm: print(nm.group(1)); sys.exit(0)
+except: pass
+print('')
+" 2>/dev/null)
+        fi
+
+        local running_display="${running_alias:-${running_model:-none}}"
+
+        # Fallback: check current selected_model in DB if no container detected
+        local current_db_model=""
+        if [ -z "$running_container" ] && [ -f "$HOME/.ironclaw/.env" ]; then
+            set -o allexport; source "$HOME/.ironclaw/.env"; set +o allexport
+            current_db_model=$(psql "${DATABASE_URL}" -tAc \
+                "SELECT value FROM settings WHERE user_id='default' AND key='selected_model';" \
+                2>/dev/null | tr -d '"' || true)
+        fi
+        [ "$running_display" = "none" ] && [ -n "$current_db_model" ] && running_display="$current_db_model"
+
+        local conflict_label="${running_container:-DB}"
+        if [ "$running_display" != "$chosen_model" ] && [ "$running_display" != "none" ] && [ -n "$running_display" ]; then
+            echo ""
+            printf "  ${YELLOW}⚠  Model conflict detected${RESET}\n"
+            echo ""
+            printf "  Role recommends:   ${BOLD}%s${RESET}\n" "$chosen_model"
+            printf "  Currently set:     ${BOLD}%s${RESET} (DB)\n" "$running_display"
+            echo ""
+            printf "  ${DIM}Note: this only changes which model IronClaw sends requests to.${RESET}\n"
+            printf "  ${DIM}It does NOT load or unload models from GB10 unified memory.${RESET}\n"
+            printf "  ${DIM}To load a different model use [2] Models or [5] Switch Mode from the main menu.${RESET}\n"
+            echo ""
+            echo "  [1] Switch IronClaw to $chosen_model"
+            echo "  [2] Keep IronClaw using $running_display"
+            echo "  [3] Cancel role switch"
+            echo ""
+            ask "Select:"
+            read -r model_action
+
+            case "$model_action" in
+                1)
+                    if [ -n "$running_container" ]; then
+                        printf "  → Stopping %s (timeout 25s)..." "$running_container"
+                        docker stop --time 25 "$running_container" 2>/dev/null \
+                            && docker rm "$running_container" 2>/dev/null \
+                            && printf " ${GREEN}done${RESET}\n" || printf " ${YELLOW}forced${RESET}\n"
+                    fi
+                    if [ -f "$HOME/.ironclaw/.env" ]; then
+                        set -o allexport; source "$HOME/.ironclaw/.env"; set +o allexport
+                        psql "${DATABASE_URL}" -c "
+                            INSERT INTO settings (user_id, key, value)
+                            VALUES ('default', 'selected_model', '\"${chosen_model}\"')
+                            ON CONFLICT (user_id, key) DO UPDATE SET value = '\"${chosen_model}\"';
+                        " >/dev/null 2>&1 && ok "model set to $chosen_model" || true
+                    fi
+                    ;;
+                2)
+                    if [ -n "$running_alias" ] && [ -f "$HOME/.ironclaw/.env" ]; then
+                        set -o allexport; source "$HOME/.ironclaw/.env"; set +o allexport
+                        psql "${DATABASE_URL}" -c "
+                            INSERT INTO settings (user_id, key, value)
+                            VALUES ('default', 'selected_model', '\"${running_alias}\"')
+                            ON CONFLICT (user_id, key) DO UPDATE SET value = '\"${running_alias}\"';
+                        " >/dev/null 2>&1 && ok "model kept as $running_display" || true
+                    else
+                        ok "keeping current model $running_display"
+                    fi
+                    ;;
+                3|*)
+                    echo "  Role switch cancelled."
+                    return
+                    ;;
+            esac
+        else
+            if [ -f "$HOME/.ironclaw/.env" ]; then
+                set -o allexport; source "$HOME/.ironclaw/.env"; set +o allexport
+                psql "${DATABASE_URL}" -c "
+                    INSERT INTO settings (user_id, key, value)
+                    VALUES ('default', 'selected_model', '\"${chosen_model}\"')
+                    ON CONFLICT (user_id, key) DO UPDATE SET value = '\"${chosen_model}\"';
+                " >/dev/null 2>&1 && ok "model set to $chosen_model" || true
+            fi
+        fi
+    fi
+
+    # Restart IronClaw to apply changes
+    info "Restarting IronClaw..."
+    systemctl --user restart ironclaw 2>/dev/null
+    sleep 3
+    systemctl --user is-active --quiet ironclaw && ok "IronClaw running" || warn "IronClaw failed — check: journalctl --user -u ironclaw -n 20"
+
+    echo ""
+    printf "  ${GREEN}✓${RESET} Role switched to ${BOLD}%s${RESET}\n" "$chosen"
+}
+
 if [ "${1:-}" = "model" ];      then change_model;       exit; fi
 if [ "${1:-}" = "embeddings" ]; then configure_embeddings; exit; fi
 if [ "${1:-}" = "models" ];     then manage_models;        exit; fi
+if [ "${1:-}" = "role" ];       then switch_role;          exit; fi
 
 printf "\n\033[1m=== IronClaw Setup ===\033[0m\n\n"
 
@@ -1014,11 +1241,13 @@ if [ -f "$ENV_FILE" ]; then
     echo "  [1] Fresh install (overwrites existing setup)"
     echo "  [2] Change default LLM model"
     echo "  [3] Configure embeddings"
-    echo "  [4] Uninstall IronClaw (clean removal)"
+    echo "  [4] Manage inference models"
+    echo "  [5] Switch agent role"
+    echo "  [6] Uninstall IronClaw (clean removal)"
     echo "  [q] Quit"
 else
     echo "  [1] Install IronClaw"
-    echo "  [5] Uninstall IronClaw (clean removal)"
+    echo "  [6] Uninstall IronClaw (clean removal)"
     echo "  [q] Quit"
 fi
 
@@ -1030,7 +1259,9 @@ case "$sel" in
     1) run_install ;;
     2) change_model ;;
     3) configure_embeddings ;;
-    4) uninstall ;;
+    4) manage_models ;;
+    5) switch_role ;;
+    6) uninstall ;;
     q|Q) echo "Bye." ;;
     *) echo "Invalid." ;;
 esac
