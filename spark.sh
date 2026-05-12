@@ -193,11 +193,60 @@ No entries yet." 2>/dev/null && ok "reset MEMORY.md" || true
     local role_model="${ROLE_MODEL[$role]:-}"
     if [ -n "$role_model" ] && [ -f "$HOME/.ironclaw/.env" ]; then
         set -o allexport; source "$HOME/.ironclaw/.env"; set +o allexport
-        psql "${DATABASE_URL}" -c "
-            INSERT INTO settings (user_id, key, value)
-            VALUES ('default', 'selected_model', '\"${role_model}\"')
-            ON CONFLICT (user_id, key) DO UPDATE SET value = '\"${role_model}\"';
-        " >/dev/null 2>&1 && ok "IronClaw model → $role_model" || true
+
+        local running_container running_display
+        running_container=$(docker ps --format '{{.Names}}' 2>/dev/null | grep -E '^(vllm|atlas)-' | head -1 || true)
+        running_display=$(cat "$HOME/.ironclaw/last_model" 2>/dev/null | tr -d '[:space:]' || true)
+        [ -z "$running_display" ] && running_display="$running_container"
+
+        local current_db_model
+        current_db_model=$(psql "${DATABASE_URL}" -tAc \
+            "SELECT value FROM settings WHERE user_id='default' AND key='selected_model';" \
+            2>/dev/null | tr -d '"' || true)
+
+        if [ -n "$current_db_model" ] && [ "$current_db_model" != "$role_model" ]; then
+            echo ""
+            printf "  ${YELLOW}⚠  Model conflict detected${RESET}\n"
+            echo ""
+            printf "  Role recommends:   ${BOLD}%s${RESET}\n" "$role_model"
+            printf "  Currently set:     ${BOLD}%s${RESET} (DB)\n" "$current_db_model"
+            [ -n "$running_container" ] && printf "  Running container: ${BOLD}%s${RESET}\n" "$running_container"
+            echo ""
+            printf "  ${DIM}Note: this only changes which model IronClaw sends requests to.${RESET}\n"
+            printf "  ${DIM}It does NOT load or unload models from GB10 unified memory.${RESET}\n"
+            printf "  ${DIM}To load a different model use [2] Models or [5] Switch Mode.${RESET}\n"
+            echo ""
+            echo "  [1] Switch IronClaw to $role_model"
+            echo "  [2] Keep IronClaw using $current_db_model"
+            echo "  [3] Cancel role switch"
+            echo ""
+            ask "Select [1]:"
+            read -r model_action
+            model_action="${model_action:-1}"
+
+            case "$model_action" in
+                1)
+                    psql "${DATABASE_URL}" -c "
+                        INSERT INTO settings (user_id, key, value)
+                        VALUES ('default', 'selected_model', '\"${role_model}\"')
+                        ON CONFLICT (user_id, key) DO UPDATE SET value = '\"${role_model}\"';
+                    " >/dev/null 2>&1 && ok "IronClaw model → $role_model" || true
+                    ;;
+                2)
+                    ok "keeping IronClaw model as $current_db_model"
+                    ;;
+                3|*)
+                    echo "  Role switch cancelled."
+                    return 1
+                    ;;
+            esac
+        else
+            psql "${DATABASE_URL}" -c "
+                INSERT INTO settings (user_id, key, value)
+                VALUES ('default', 'selected_model', '\"${role_model}\"')
+                ON CONFLICT (user_id, key) DO UPDATE SET value = '\"${role_model}\"';
+            " >/dev/null 2>&1 && ok "IronClaw model → $role_model" || true
+        fi
     fi
 }
 
