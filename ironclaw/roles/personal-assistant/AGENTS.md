@@ -25,7 +25,7 @@ Personal assistant agent. Always-on via Telegram.
 
 ## Switching Models
 ```bash
-~/repos/dev-private-spark-inference/ironclaw/setup.sh model
+~/repos/spark-inference/ironclaw/setup.sh model
 ```
 
 ## Embedding Infrastructure

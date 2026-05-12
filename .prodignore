@@ -1,4 +1,0 @@
-# Files excluded from production sync
-scripts/sync-to-prod.sh
-DEV.md
-.prodignore

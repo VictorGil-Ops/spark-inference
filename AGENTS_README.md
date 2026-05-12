@@ -30,7 +30,7 @@ The agent uses a role system to adapt its identity, behaviour, and default model
 Roles are stored in `ironclaw/roles/`. Switch roles at any time from the main menu:
 
 ```bash
-bash ~/repos/dev-private-spark-inference/spark.sh
+bash ~/repos/spark-inference/spark.sh
 # [5] Switch Mode → [r] Switch agent role only
 ```
 
@@ -149,7 +149,7 @@ systemctl --user restart ironclaw
 Or run a full reset which reimports everything:
 
 ```bash
-bash ~/repos/dev-private-spark-inference/ironclaw/reset-ironclaw.sh
+bash ~/repos/spark-inference/ironclaw/reset-ironclaw.sh
 ```
 
 ---
@@ -171,7 +171,7 @@ bash ~/repos/dev-private-spark-inference/ironclaw/reset-ironclaw.sh
 ## Switching Roles
 
 ```bash
-bash ~/repos/dev-private-spark-inference/spark.sh
+bash ~/repos/spark-inference/spark.sh
 # [5] Switch Mode → [r] Switch agent role only
 ```
 
@@ -205,7 +205,7 @@ The onboarding questionnaire asks:
 If the agent behaves incorrectly, run a reset to restore a clean state:
 
 ```bash
-bash ~/repos/dev-private-spark-inference/ironclaw/reset-ironclaw.sh
+bash ~/repos/spark-inference/ironclaw/reset-ironclaw.sh
 ```
 
 This fixes stale PIDs, stuck jobs, PostgreSQL SSL issues, LiteLLM connectivity, Telegram polling, and reimports all workspace files into memory.

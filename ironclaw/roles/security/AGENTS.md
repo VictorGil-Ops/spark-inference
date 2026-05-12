@@ -26,7 +26,7 @@ Security research assistant. Available via Telegram and CLI.
 
 ## Switching Models
 ```bash
-~/repos/dev-private-spark-inference/ironclaw/setup.sh model
+~/repos/spark-inference/ironclaw/setup.sh model
 ```
 
 ## Embedding Infrastructure

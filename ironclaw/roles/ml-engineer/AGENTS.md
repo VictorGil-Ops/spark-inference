@@ -25,14 +25,14 @@ AI/ML engineering assistant. Available via Telegram and CLI.
 - **github** — read and update inference recipes, track upstream vLLM changes
 
 ## Key Paths
-- Recipes: `~/repos/dev-private-spark-inference/recipes/`
-- Mods: `~/repos/dev-private-spark-inference/mods/`
+- Recipes: `~/repos/spark-inference/recipes/`
+- Mods: `~/repos/spark-inference/mods/`
 - HF cache: `~/.cache/huggingface/hub/`
 - LiteLLM config: `~/.litellm/litellm_config.yaml`
 
 ## Switching Models
 ```bash
-~/repos/dev-private-spark-inference/ironclaw/setup.sh model
+~/repos/spark-inference/ironclaw/setup.sh model
 ```
 
 ## Embedding Infrastructure
