@@ -78,3 +78,19 @@ model_list:
       api_key: sk-no-key
     model_info:
       supports_function_calling: true
+
+  - model_name: gpt-oss-120b
+    litellm_params:
+      model: openai/openai/gpt-oss-120b
+      api_base: http://127.0.0.1:8400/v1
+      api_key: sk-no-key
+    model_info:
+      supports_function_calling: true
+
+  - model_name: claude
+    litellm_params:
+      model: openai/openai/gpt-oss-120b
+      api_base: http://127.0.0.1:8400/v1
+      api_key: sk-no-key
+    model_info:
+      supports_function_calling: true

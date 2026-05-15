@@ -35,38 +35,33 @@ launch() {
         echo ""
     fi
 
-    # Warn if an existing container was launched with a different execution mode
+    # Remove any stopped container with the same name before launching
     if docker inspect "$cname" >/dev/null 2>&1; then
-        local recipe_eager container_eager
-        recipe_eager=$(python3 -c "
+        echo "Removing existing stopped container: ${cname}..."
+        docker rm "$cname" >/dev/null
+        echo "  ✓ Removed"
+        echo ""
+    fi
+
+    # Check required container image is available locally
+    local req_image
+    req_image=$(python3 -c "
 import re, sys
 raw = open('${RECIPES_DIR}/${recipe}.yaml').read()
-print('yes' if '--enforce-eager' in raw else 'no')
-")
-        container_eager=$(docker inspect "$cname" \
-            --format '{{range .Config.Cmd}}{{.}} {{end}} {{range .Config.Entrypoint}}{{.}} {{end}}' \
-            2>/dev/null | grep -q "enforce-eager" && echo "yes" || echo "no")
-
-        if [ "$recipe_eager" != "$container_eager" ]; then
-            echo ""
-            if [ "$recipe_eager" = "no" ]; then
-                echo "  ⚠  Switching to CUDA graphs mode."
-                echo "     Container '${cname}' was previously loaded in eager mode."
-            else
-                echo "  ⚠  Switching to eager mode."
-                echo "     Container '${cname}' was previously loaded with CUDA graphs."
-            fi
-            echo "     The cached container state may conflict. Remove it for a clean load:"
-            echo ""
-            echo "       docker rm ${cname}"
-            echo ""
-            read -rp "  Remove container now and continue? [Y/n]: " c
-            if [[ ! "$c" =~ ^[nN] ]]; then
-                docker rm "$cname" >/dev/null 2>&1 || true
-                echo "  ✓ Container removed"
-            fi
-            echo ""
-        fi
+m = re.search(r'^container:\s*(\S+)', raw, re.MULTILINE)
+print(m.group(1).strip() if m else 'vllm-node')
+" 2>/dev/null)
+    if [ -n "$req_image" ] && ! docker image inspect "$req_image" >/dev/null 2>&1; then
+        echo ""
+        echo "  ✗  Container image '${req_image}' not found locally."
+        echo ""
+        echo "     Build it first:"
+        echo "       cd ${SPARK_VLLM_DIR}"
+        local df_flag=""
+        [[ "$req_image" == *mxfp4* ]] && df_flag=" -f Dockerfile.mxfp4"
+        echo "       ./build-and-copy.sh -t ${req_image}${df_flag}"
+        echo ""
+        return 1
     fi
 
     echo "Starting: ${recipe} → container: ${cname}"
@@ -230,8 +225,57 @@ echo ""
 
 RUNNING_CONTAINERS=$(docker ps --format "{{.Names}}" 2>/dev/null | grep "^vllm" | tr '\n' ',' || true)
 
+# ── Show running model(s) ─────────────────────────────────────────────────────
+python3 - "$RECIPES_DIR" "$RUNNING_CONTAINERS" <<'RUNNING_EOF'
+import sys, os, re, subprocess, urllib.request, json
+
+recipes_root = sys.argv[1]
+ctrs = [c for c in sys.argv[2].split(',') if c]
+
+if not ctrs:
+    sys.exit(0)
+
+recipe_map = {}
+for mode in ('ironclaw', 'opencode', ''):
+    d = os.path.join(recipes_root, mode) if mode else recipes_root
+    if not os.path.isdir(d): continue
+    for fname in os.listdir(d):
+        if not fname.endswith('.yaml'): continue
+        slug = fname[:-5]
+        label = f"{mode}/{slug}" if mode else slug
+        recipe_map[f"vllm-{slug}"] = (mode or "standalone", label)
+        key = "vllm_" + slug.replace("-","_").replace(".","_").replace("/","_")
+        recipe_map[key] = (mode or "standalone", label)
+        if mode:
+            key2 = "vllm_" + f"{mode}/{slug}".replace("-","_").replace(".","_").replace("/","_")
+            recipe_map[key2] = (mode, label)
+
+GREEN="\033[32m"; CYAN="\033[36m"; MAG="\033[35m"; RESET="\033[0m"; BOLD="\033[1m"
+MODE_COLOR = {"ironclaw": MAG, "opencode": CYAN, "standalone": GREEN}
+
+for ctr in ctrs:
+    info = recipe_map.get(ctr)
+    if info:
+        mode, label = info
+        col = MODE_COLOR.get(mode, GREEN)
+        print(f"  {BOLD}Running{RESET}   {GREEN}●{RESET} {col}{mode}{RESET}  {label}")
+    else:
+        model_id = None
+        try:
+            r = subprocess.run(["docker","exec",ctr,"ps","ax"], capture_output=True, text=True, timeout=3)
+            pm = re.search(r"--port\s+(\d+)", r.stdout)
+            if pm:
+                with urllib.request.urlopen(f"http://127.0.0.1:{pm.group(1)}/v1/models", timeout=2) as resp:
+                    model_id = json.loads(resp.read())["data"][0]["id"]
+        except Exception:
+            pass
+        suffix = f"  {CYAN}{model_id}{RESET}" if model_id else ""
+        print(f"  {BOLD}Running{RESET}   {GREEN}●{RESET} {ctr}{suffix}")
+print()
+RUNNING_EOF
+
 RECIPE_LIST=$(python3 - "$RECIPES_DIR" "$AVAIL_GB" "$RUNNING_CONTAINERS" "$HF_CACHE" <<'PYEOF'
-import sys, os, re
+import sys, os, re, subprocess, tempfile
 
 recipes_dir  = sys.argv[1]
 avail_gb     = int(sys.argv[2])
@@ -239,67 +283,103 @@ running_ctrs = set(sys.argv[3].split(',')) if sys.argv[3] else set()
 hf_cache     = sys.argv[4]
 
 def container_name(slug):
-    return 'vllm_' + slug.replace('-', '_').replace('.', '_')
+    return 'vllm_' + slug.replace('-', '_').replace('.', '_').replace('/', '_')
 
 def is_cached(model_id, hf_cache):
-    # HF cache dir: models--<org>--<name>/snapshots/
     cache_name = 'models--' + model_id.replace('/', '--')
     snap_dir = os.path.join(hf_cache, cache_name, 'snapshots')
     if not os.path.isdir(snap_dir):
         return False
-    return any(os.scandir(snap_dir))  # has at least one snapshot
+    return any(os.scandir(snap_dir))
+
+def image_exists(tag):
+    try:
+        r = subprocess.run(['docker', 'image', 'inspect', tag], capture_output=True)
+        return r.returncode == 0
+    except Exception:
+        return True
 
 GREEN  = '\033[32m'
 CYAN   = '\033[36m'
+MAG    = '\033[35m'
+RED    = '\033[31m'
+DIM    = '\033[2m'
+BOLD   = '\033[1m'
 RESET  = '\033[0m'
 
-yamls = sorted(f for f in os.listdir(recipes_dir) if f.endswith('.yaml'))
+GROUP_COLOR = {'ironclaw': MAG, 'opencode': CYAN}
 
-entries = []
-for fname in yamls:
-    slug = fname[:-5]
-    path = os.path.join(recipes_dir, fname)
+def parse_yaml(path, slug):
     with open(path) as fh:
         raw = fh.read()
-
-    name_m = re.search(r'^name:\s*(.+)', raw, re.MULTILINE)
-    name   = name_m.group(1).strip() if name_m else slug
-
+    name_m   = re.search(r'^name:\s*(.+)', raw, re.MULTILINE)
     model_m  = re.search(r'^model:\s*(.+)', raw, re.MULTILINE)
+    port_m   = re.search(r'port:\s*(\d+)', raw)
+    mem_m    = re.search(r'#\s*(?:Memory|RAM):\s*~?(\d+)GB', raw, re.IGNORECASE)
+    util_m   = re.search(r'gpu_memory_utilization:\s*([\d.]+)', raw)
+    toks_m   = re.search(r'tok/s:\s*~?([\d\-]+)', raw)
+    ctx_m    = re.search(r'max_model_len:\s*(\d+)', raw)
+    img_m    = re.search(r'^container:\s*(\S+)', raw, re.MULTILINE)
+    name     = name_m.group(1).strip() if name_m else slug.split('/')[-1]
     model_id = model_m.group(1).strip() if model_m else ''
+    port     = port_m.group(1) if port_m else '????'
+    ram_gb   = int(mem_m.group(1)) if mem_m else (round(float(util_m.group(1)) * 128) if util_m else 0)
+    toks     = toks_m.group(1) if toks_m else '??'
+    ctx_k    = str(int(ctx_m.group(1)) // 1024) + 'k' if ctx_m else '??'
+    img_tag  = img_m.group(1).strip() if img_m else 'vllm-node'
+    img_ok   = img_tag == 'vllm-node' or image_exists(img_tag)
+    return name, model_id, port, ram_gb, toks, ctx_k, img_ok
 
-    port_m = re.search(r'port:\s*(\d+)', raw)
-    port   = port_m.group(1) if port_m else '????'
+# Collect groups: standalone (root), then subdirs sorted
+groups = []
+root_yamls = sorted(f for f in os.listdir(recipes_dir) if f.endswith('.yaml'))
+if root_yamls:
+    groups.append(('', root_yamls, recipes_dir))
+for subdir in sorted(d for d in os.listdir(recipes_dir)
+                     if os.path.isdir(os.path.join(recipes_dir, d))):
+    subpath = os.path.join(recipes_dir, subdir)
+    yamls = sorted(f for f in os.listdir(subpath) if f.endswith('.yaml'))
+    if yamls:
+        groups.append((subdir, yamls, subpath))
 
-    mem_m = re.search(r'#\s*(?:Memory|RAM):\s*~?(\d+)GB', raw, re.IGNORECASE)
-    if mem_m:
-        ram_gb = int(mem_m.group(1))
-    else:
-        util_m = re.search(r'gpu_memory_utilization:\s*([\d.]+)', raw)
-        ram_gb = round(float(util_m.group(1)) * 128) if util_m else 0
+# First pass: collect all entries to determine max label width
+all_entries = []
+for group_name, yamls, basepath in groups:
+    for fname in yamls:
+        slug = (f"{group_name}/{fname[:-5]}" if group_name else fname[:-5])
+        path = os.path.join(basepath, fname)
+        try:
+            name, model_id, port, ram_gb, toks, ctx_k, img_ok = parse_yaml(path, slug)
+        except Exception:
+            continue
+        leaf = slug.split('/')[-1]
+        warn    = ' ⚠' if ram_gb > avail_gb else ''
+        cname   = container_name(slug)
+        running = cname in running_ctrs or f"vllm-{leaf}" in running_ctrs
+        cached  = is_cached(model_id, hf_cache)
+        all_entries.append((group_name, slug, leaf, model_id, port, ram_gb, toks, ctx_k, img_ok, warn, running, cached))
 
-    toks_m = re.search(r'tok/s:\s*~?([\d\-]+)', raw)
-    toks   = toks_m.group(1) if toks_m else '??'
+col_w = max((len(e[2]) for e in all_entries), default=34)
+col_w = max(col_w, len('Recipe'))
 
-    ctx_m  = re.search(r'max_model_len:\s*(\d+)', raw)
-    ctx_k  = str(int(ctx_m.group(1)) // 1024) + 'k' if ctx_m else '??'
+print(f"  {'#':<3}  {'':2}  {'':2}  {'':2}  {'Recipe':<{col_w}}  {'Port':<5}  {'RAM':>5}  {'tok/s':>6}  {'ctx':>5}")
+print(f"  {'-'*3}  {'--'}  {'--'}  {'--'}  {'-'*col_w}  {'-'*5}  {'-'*5}  {'-'*6}  {'-'*5}")
 
-    warn    = ' ⚠' if ram_gb > avail_gb else ''
-    running = container_name(slug) in running_ctrs
-    cached  = is_cached(model_id, hf_cache)
-
-    entries.append((slug, model_id, port, ram_gb, toks, ctx_k, warn, running, cached))
-
-print(f"  {'#':<3}  {'':2}  {'':2}  {'Recipe':<34}  {'Port':<5}  {'RAM':>5}  {'tok/s':>6}  {'ctx':>5}")
-print(f"  {'-'*3}  {'--'}  {'--'}  {'-'*34}  {'-'*5}  {'-'*5}  {'-'*6}  {'-'*5}")
-for i, (slug, mid, port, ram, toks, ctx, warn, running, cached) in enumerate(entries, 1):
+i = 0
+prev_group = None
+for group_name, slug, leaf, model_id, port, ram_gb, toks, ctx_k, img_ok, warn, running, cached in all_entries:
+    if group_name != prev_group and group_name:
+        col = GROUP_COLOR.get(group_name, DIM)
+        print(f"  {col}{DIM}── {group_name} ──{RESET}")
+        prev_group = group_name
+    i += 1
     dot   = f'{GREEN}●{RESET}' if running else ' '
-    check = f'{CYAN}✓{RESET}' if cached  else ' '
-    print(f"  {i:<3}  {dot}  {check}  {slug:<34}  {port:<5}  {ram:>4}GB  {toks:>6}  {ctx:>5}{warn}")
+    check = f'{CYAN}✓{RESET}'  if cached  else ' '
+    img   = ' '               if img_ok  else f'{RED}✗{RESET}'
+    print(f"  {i:<3}  {dot}  {check}  {img}  {leaf:<{col_w}}  {port:<5}  {ram_gb:>4}GB  {toks:>6}  {ctx_k:>5}{warn}")
 
-import tempfile
 tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.recipes', delete=False)
-for slug, model_id, *_ in entries:
+for (_, slug, leaf, model_id, *_rest) in all_entries:
     tmp.write(f"{slug}\t{model_id}\n")
 tmp.close()
 print(f"__TMPFILE__={tmp.name}")
@@ -323,7 +403,7 @@ done < "$TMPFILE"
 rm -f "$TMPFILE"
 
 COUNT=${#SLUGS[@]}
-printf "  \033[32m●\033[0m running   \033[36m✓\033[0m cached locally   ⚠ exceeds free RAM\n"
+printf "  \033[32m●\033[0m running   \033[36m✓\033[0m cached locally   \033[31m✗\033[0m image not built   ⚠ exceeds free RAM\n"
 echo ""
 echo "  [x <num>]  Unload from memory (stop container)   (e.g. x2)"
 echo "  [l <num>]  Logs (tail -f container logs)         (e.g. l2)"

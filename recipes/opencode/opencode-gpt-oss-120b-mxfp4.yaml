@@ -1,0 +1,50 @@
+# Recipe: OpenAI GPT-OSS 120B MXFP4 — opencode agent mode
+# REQUIRES: vllm-node-mxfp4 image — build with:
+#   cd ~/repos/spark-vllm-docker && ./build-and-copy.sh -t vllm-node-mxfp4 -f Dockerfile.mxfp4
+# Memory: ~90GB | tok/s: ~??
+recipe_version: "1"
+name: OpenAI GPT-OSS 120B MXFP4
+description: |
+  OpenAI GPT-OSS 120B MoE with MXFP4 quantization and FlashInfer.
+  Requires vllm-node-mxfp4 container image.
+model: openai/gpt-oss-120b
+container: vllm-node-mxfp4
+solo_only: true
+
+build_args:
+  - --exp-mxfp4
+
+mods: []
+
+env:
+  VLLM_USE_FLASHINFER_MOE_MXFP4_MXFP8: "1"
+
+defaults:
+  port: 8400
+  host: 0.0.0.0
+  tensor_parallel: 1
+  gpu_memory_utilization: 0.75
+  max_model_len: 131072
+  max_num_batched_tokens: 32768
+  max_num_seqs: 4
+
+command: |
+  vllm serve openai/gpt-oss-120b \
+    --tool-call-parser openai \
+    --reasoning-parser openai_gptoss \
+    --enable-auto-tool-choice \
+    --chat-template-content-format string \
+    --gpu-memory-utilization {gpu_memory_utilization} \
+    --max-model-len {max_model_len} \
+    --max-num-seqs {max_num_seqs} \
+    --max-num-batched-tokens {max_num_batched_tokens} \
+    --enable-prefix-caching \
+    --load-format fastsafetensors \
+    --quantization mxfp4 \
+    --mxfp4-backend CUTLASS \
+    --mxfp4-layers moe,qkv,o,lm_head \
+    --attention-backend FLASHINFER \
+    --kv-cache-dtype fp8 \
+    --tensor-parallel-size {tensor_parallel} \
+    --host {host} \
+    --port {port}

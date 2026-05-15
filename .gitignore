@@ -9,3 +9,5 @@ models/
 wheels/
 .cache/
 .private/
+.claude/
+.engines/

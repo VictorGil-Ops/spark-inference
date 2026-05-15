@@ -77,13 +77,84 @@ print_status() {
     printf "  ${BOLD}System${RESET}    %sGB / %sGB RAM used  (%sGB free)\n" "$used" "$total" "$avail"
     printf "  ${BOLD}Storage${RESET}   %sGB / %sGB used  (%sGB free)\n" "$disk_used" "$disk_total" "$disk_free"
 
-    # Running vLLM containers
-    local vllm_running
-    vllm_running=$(docker ps --format "{{.Names}}" 2>/dev/null | grep "^vllm" | tr '\n' '  ' || true)
-    if [ -n "$vllm_running" ]; then
-        printf "  ${BOLD}Models${RESET}    ${GREEN}%s${RESET}\n" "$vllm_running"
-    else
+    # Running vLLM containers — detect ironclaw/opencode/standalone mode
+    local vllm_lines
+    vllm_lines=$(python3 - "$REPO_DIR/recipes" <<'PYEOF'
+import sys, os, re, subprocess
+
+recipes_root = sys.argv[1]
+
+# Build map: container_name_variant -> (mode, slug)
+recipe_map = {}
+for mode in ('ironclaw', 'opencode', ''):
+    d = os.path.join(recipes_root, mode) if mode else recipes_root
+    if not os.path.isdir(d):
+        continue
+    for fname in os.listdir(d):
+        if not fname.endswith('.yaml'):
+            continue
+        slug = fname[:-5]
+        label = f"{mode}/{slug}" if mode else slug
+        # switch_mode naming: vllm-<slug>
+        recipe_map[f"vllm-{slug}"] = (mode or "standalone", label)
+        # run.sh naming: vllm_<slug with -./->_>
+        key = "vllm_" + slug.replace("-", "_").replace(".", "_").replace("/", "_")
+        recipe_map[key] = (mode or "standalone", label)
+        # run.sh with mode prefix: vllm_<mode>_<slug...>
+        if mode:
+            key2 = "vllm_" + f"{mode}/{slug}".replace("-","_").replace(".","_").replace("/","_")
+            recipe_map[key2] = (mode, label)
+
+result = subprocess.run(
+    ["docker", "ps", "--format", "{{.Names}}"],
+    capture_output=True, text=True
+)
+ctrs = [n for n in result.stdout.splitlines() if n.startswith("vllm")]
+
+if not ctrs:
+    print("NONE")
+    sys.exit(0)
+
+MODE_COLOR = {"ironclaw": "\033[35m", "opencode": "\033[36m", "standalone": "\033[32m"}
+RESET = "\033[0m"
+BOLD  = "\033[1m"
+GREEN = "\033[32m"
+
+for ctr in ctrs:
+    info = recipe_map.get(ctr)
+    if info:
+        mode, label = info
+        col = MODE_COLOR.get(mode, GREEN)
+        print(f"  {BOLD}Models{RESET}    {GREEN}●{RESET} {col}{mode}{RESET}  {label}")
+    else:
+        # Fallback: query the running process inside the container for the port
+        import urllib.request, json
+        model_id = None
+        try:
+            r = subprocess.run(
+                ["docker", "exec", ctr, "ps", "ax"],
+                capture_output=True, text=True, timeout=3
+            )
+            pm = re.search(r"--port\s+(\d+)", r.stdout)
+            if pm:
+                port = pm.group(1)
+                with urllib.request.urlopen(
+                    f"http://127.0.0.1:{port}/v1/models", timeout=2
+                ) as resp:
+                    data = json.loads(resp.read())
+                    model_id = data["data"][0]["id"]
+        except Exception:
+            pass
+        if model_id:
+            print(f"  {BOLD}Models{RESET}    {GREEN}●{RESET} {ctr}  {model_id}")
+        else:
+            print(f"  {BOLD}Models{RESET}    {GREEN}●{RESET} {ctr}")
+PYEOF
+    )
+    if [ "$vllm_lines" = "NONE" ]; then
         printf "  ${BOLD}Models${RESET}    ${DIM}none running${RESET}\n"
+    else
+        echo "$vllm_lines"
     fi
 
     # Active embedding model from systemd service + port check

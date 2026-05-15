@@ -141,6 +141,7 @@ Type=simple
 WorkingDirectory=$REPO_DIR
 Environment=HOME=$HOME
 Environment=PATH=$PATH
+UnsetEnvironment=DATABASE_URL DATABASE_BACKEND
 ExecStart=/home/${USER}/.local/bin/litellm --config /home/${USER}/.litellm/litellm_config.yaml
 Restart=always
 RestartSec=10

@@ -1024,7 +1024,14 @@ switch_role() {
     current_role=$(grep -i "^- \*\*Role:\*\*" ~/.ironclaw/workspace/IDENTITY.md 2>/dev/null | sed 's/.*Role:\*\* //' || true)
 
     printf "\n${BOLD}=== Switch Agent Role ===${RESET}\n\n"
-    [ -n "$current_role" ] && printf "  Current: ${GREEN}%s${RESET}\n\n" "$current_role"
+    printf "  ${YELLOW}┌──────────────────────────────────────────────────────────────────┐${RESET}\n"
+    printf "  ${YELLOW}│  ⚠  PROOF OF CONCEPT — No real model-role fitness validation     │${RESET}\n"
+    printf "  ${YELLOW}│     Recommended models are assigned manually. There is no         │${RESET}\n"
+    printf "  ${YELLOW}│     automated check that a model is well-suited for a given role. │${RESET}\n"
+    printf "  ${YELLOW}│     Use your own judgement when selecting a model.                │${RESET}\n"
+    printf "  ${YELLOW}└──────────────────────────────────────────────────────────────────┘${RESET}\n"
+    echo ""
+    [ -n "$current_role" ] && printf "  Current role: ${GREEN}%s${RESET}\n\n" "$current_role"
 
     # Role descriptions
     declare -A ROLE_DESC
@@ -1106,116 +1113,65 @@ switch_role() {
 
 No entries yet." 2>/dev/null && ok "reset MEMORY.md" || true
 
-    # ── Model conflict detection ──────────────────────────────────────────────────
-    if [ -n "$chosen_model" ]; then
-        local running_container running_slug
-        running_container=$(docker ps --format '{{.Names}}' 2>/dev/null | grep -E '^(vllm|atlas)-' | head -1 || true)
-        running_slug=$(echo "$running_container" | sed 's/^vllm-//;s/^atlas-//')
+    # ── Model picker ──────────────────────────────────────────────────────────────
+    echo ""
+    printf "  ${BOLD}Select model for this role:${RESET}\n"
+    [ -n "$chosen_model" ] && printf "  ${DIM}Recommended: %s${RESET}\n" "$chosen_model"
+    echo ""
 
-        local running_model=""
-        if [ -f "$HOME/.ironclaw/last_model" ]; then
-            running_model=$(cat "$HOME/.ironclaw/last_model" | tr -d '[:space:]')
-        fi
-
-        local running_alias=""
-        if [ -n "$running_model" ]; then
-            running_alias=$(python3 -c "
-import re, sys, os
+    mapfile -t AVAIL_MODELS < <(python3 -c "
+import re, sys
 try:
     raw = open('$HOME/.litellm/litellm_config.yaml').read()
-    recipes_dir = '$REPO_DIR/recipes'
-    for root, dirs, files in os.walk(recipes_dir):
-        for f in files:
-            if not f.endswith('.yaml'): continue
-            rpath = os.path.join(root, f)
-            slug = f[:-5].replace('-','_').replace('.','_')
-            if slug in '$running_model'.replace('-','_').replace('.','_'):
-                rcontent = open(rpath).read()
-                m = re.search(r'port:\s*(\d+)', rcontent)
-                if m:
-                    port = m.group(1)
-                    nm = re.search(r'model_name:\s*(\S+)(?=.*api_base.*:' + port + ')', raw, re.DOTALL)
-                    if nm: print(nm.group(1)); sys.exit(0)
-except: pass
-print('')
+    skip = {'nomic-embed-text'}
+    seen = []
+    for m in re.finditer(r'- model_name:\s*(\S+)', raw):
+        name = m.group(1)
+        if name not in skip and name not in seen:
+            seen.append(name)
+            print(name)
+except Exception as e:
+    sys.exit(1)
 " 2>/dev/null)
-        fi
 
-        local running_display="${running_alias:-${running_model:-none}}"
+    local final_model="${chosen_model}"
 
-        # Fallback: check current selected_model in DB if no container detected
-        local current_db_model=""
-        if [ -z "$running_container" ] && [ -f "$HOME/.ironclaw/.env" ]; then
-            set -o allexport; source "$HOME/.ironclaw/.env"; set +o allexport
-            current_db_model=$(psql "${DATABASE_URL}" -tAc \
-                "SELECT value FROM settings WHERE user_id='default' AND key='selected_model';" \
-                2>/dev/null | tr -d '"' || true)
-        fi
-        [ "$running_display" = "none" ] && [ -n "$current_db_model" ] && running_display="$current_db_model"
-
-        local conflict_label="${running_container:-DB}"
-        if [ "$running_display" != "$chosen_model" ] && [ "$running_display" != "none" ] && [ -n "$running_display" ]; then
-            echo ""
-            printf "  ${YELLOW}⚠  Model conflict detected${RESET}\n"
-            echo ""
-            printf "  Role recommends:   ${BOLD}%s${RESET}\n" "$chosen_model"
-            printf "  Currently set:     ${BOLD}%s${RESET} (DB)\n" "$running_display"
-            echo ""
-            printf "  ${DIM}Note: this only changes which model IronClaw sends requests to.${RESET}\n"
-            printf "  ${DIM}It does NOT load or unload models from GB10 unified memory.${RESET}\n"
-            printf "  ${DIM}To load a different model use [2] Models or [5] Switch Mode from the main menu.${RESET}\n"
-            echo ""
-            echo "  [1] Switch IronClaw to $chosen_model"
-            echo "  [2] Keep IronClaw using $running_display"
-            echo "  [3] Cancel role switch"
-            echo ""
-            ask "Select:"
-            read -r model_action
-
-            case "$model_action" in
-                1)
-                    if [ -n "$running_container" ]; then
-                        printf "  → Stopping %s (timeout 25s)..." "$running_container"
-                        docker stop --time 25 "$running_container" 2>/dev/null \
-                            && docker rm "$running_container" 2>/dev/null \
-                            && printf " ${GREEN}done${RESET}\n" || printf " ${YELLOW}forced${RESET}\n"
-                    fi
-                    if [ -f "$HOME/.ironclaw/.env" ]; then
-                        set -o allexport; source "$HOME/.ironclaw/.env"; set +o allexport
-                        psql "${DATABASE_URL}" -c "
-                            INSERT INTO settings (user_id, key, value)
-                            VALUES ('default', 'selected_model', '\"${chosen_model}\"')
-                            ON CONFLICT (user_id, key) DO UPDATE SET value = '\"${chosen_model}\"';
-                        " >/dev/null 2>&1 && ok "model set to $chosen_model" || true
-                    fi
-                    ;;
-                2)
-                    if [ -n "$running_alias" ] && [ -f "$HOME/.ironclaw/.env" ]; then
-                        set -o allexport; source "$HOME/.ironclaw/.env"; set +o allexport
-                        psql "${DATABASE_URL}" -c "
-                            INSERT INTO settings (user_id, key, value)
-                            VALUES ('default', 'selected_model', '\"${running_alias}\"')
-                            ON CONFLICT (user_id, key) DO UPDATE SET value = '\"${running_alias}\"';
-                        " >/dev/null 2>&1 && ok "model kept as $running_display" || true
-                    else
-                        ok "keeping current model $running_display"
-                    fi
-                    ;;
-                3|*)
-                    echo "  Role switch cancelled."
-                    return
-                    ;;
-            esac
-        else
-            if [ -f "$HOME/.ironclaw/.env" ]; then
-                set -o allexport; source "$HOME/.ironclaw/.env"; set +o allexport
-                psql "${DATABASE_URL}" -c "
-                    INSERT INTO settings (user_id, key, value)
-                    VALUES ('default', 'selected_model', '\"${chosen_model}\"')
-                    ON CONFLICT (user_id, key) DO UPDATE SET value = '\"${chosen_model}\"';
-                " >/dev/null 2>&1 && ok "model set to $chosen_model" || true
+    if [ ${#AVAIL_MODELS[@]} -eq 0 ]; then
+        printf "  ${YELLOW}⚠  No models found in LiteLLM config — using recommended: %s${RESET}\n" "$chosen_model"
+    else
+        for i in "${!AVAIL_MODELS[@]}"; do
+            local m="${AVAIL_MODELS[$i]}"
+            if [ "$m" = "$chosen_model" ]; then
+                printf "  ${GREEN}●${RESET} [%s] %-30s ${DIM}← recommended${RESET}\n" "$((i+1))" "$m"
+            else
+                printf "    [%s] %s\n" "$((i+1))" "$m"
             fi
+        done
+        echo ""
+        [ -n "$chosen_model" ] && printf "  [Enter] Use recommended (%s)\n" "$chosen_model"
+        echo "  [q]     Cancel"
+        echo ""
+        ask "Select model:"
+        read -r msel
+        [[ "${msel,,}" == "q" ]] && return
+        if [ -z "$msel" ]; then
+            final_model="${chosen_model}"
+        elif [[ "$msel" =~ ^[0-9]+$ ]] && [ "$msel" -ge 1 ] && [ "$msel" -le "${#AVAIL_MODELS[@]}" ]; then
+            final_model="${AVAIL_MODELS[$((msel-1))]}"
+        else
+            echo "  Invalid selection — using recommended: $chosen_model"
+            final_model="${chosen_model}"
         fi
+    fi
+
+    # Update IronClaw selected_model in DB
+    if [ -n "$final_model" ] && [ -f "$HOME/.ironclaw/.env" ]; then
+        set -o allexport; source "$HOME/.ironclaw/.env"; set +o allexport
+        psql "${DATABASE_URL}" -c "
+            INSERT INTO settings (user_id, key, value)
+            VALUES ('default', 'selected_model', '\"${final_model}\"')
+            ON CONFLICT (user_id, key) DO UPDATE SET value = '\"${final_model}\"';
+        " >/dev/null 2>&1 && ok "model set to $final_model" || true
     fi
 
     # Restart IronClaw to apply changes
@@ -1230,7 +1186,7 @@ print('')
 
 if [ "${1:-}" = "model" ];      then change_model;       exit; fi
 if [ "${1:-}" = "embeddings" ]; then configure_embeddings; exit; fi
-if [ "${1:-}" = "models" ];     then manage_models;        exit; fi
+if [ "${1:-}" = "models" ];     then bash "$REPO_DIR/scripts/run.sh"; exit; fi
 if [ "${1:-}" = "role" ];       then switch_role;          exit; fi
 
 printf "\n\033[1m=== IronClaw Setup ===\033[0m\n\n"
@@ -1259,7 +1215,7 @@ case "$sel" in
     1) run_install ;;
     2) change_model ;;
     3) configure_embeddings ;;
-    4) manage_models ;;
+    4) bash "$REPO_DIR/scripts/run.sh" ;;
     5) switch_role ;;
     6) uninstall ;;
     q|Q) echo "Bye." ;;
