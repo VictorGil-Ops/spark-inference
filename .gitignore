@@ -11,3 +11,4 @@ wheels/
 .private/
 .claude/
 .engines/
+sync-to-prod.sh
