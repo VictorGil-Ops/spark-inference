@@ -12,7 +12,8 @@ HF_CACHE="${HF_HOME:-$HOME/.cache/huggingface}/hub"
 # ── Map recipe name → Docker container name ───────────────────────────────────
 # Deterministic: vllm_ + slug with - and . replaced by _
 container_name() {
-    echo "vllm_$(echo "$1" | tr -- '-./' '__')"
+    local leaf="${1##*/}"  # strip subdir prefix (opencode/foo → foo)
+    echo "vllm_$(echo "$leaf" | tr -- '-.' '__')"
 }
 
 # ── Launch a recipe ───────────────────────────────────────────────────────────
@@ -113,8 +114,16 @@ print(m.group(1).strip() if m else 'vllm-node')
 # ── Unload a model from memory (stop its container) ──────────────────────────
 unload_model() {
     local slug="$1"
-    local cname
+    local cname leaf
     cname=$(container_name "$slug")
+    leaf="${slug##*/}"
+    if ! docker inspect "$cname" >/dev/null 2>&1; then
+        if docker inspect "vllm-${leaf}" >/dev/null 2>&1; then
+            cname="vllm-${leaf}"
+        elif docker inspect "vllm_node" >/dev/null 2>&1; then
+            cname="vllm_node"
+        fi
+    fi
     echo ""
     echo "Stopping container: ${cname}"
     if docker stop "$cname" 2>/dev/null; then
@@ -283,7 +292,8 @@ running_ctrs = set(sys.argv[3].split(',')) if sys.argv[3] else set()
 hf_cache     = sys.argv[4]
 
 def container_name(slug):
-    return 'vllm_' + slug.replace('-', '_').replace('.', '_').replace('/', '_')
+    leaf = slug.split('/')[-1]
+    return 'vllm_' + leaf.replace('-', '_').replace('.', '_')
 
 def is_cached(model_id, hf_cache):
     cache_name = 'models--' + model_id.replace('/', '--')
@@ -437,8 +447,15 @@ while true; do
             echo "  Invalid selection."; continue
         fi
         cname=$(container_name "${SLUGS[$((idx-1))]}")
+        leaf="${SLUGS[$((idx-1))]##*/}"
         if ! docker inspect "$cname" >/dev/null 2>&1; then
-            echo "  ✗ ${cname} is not running"; continue
+            if docker inspect "vllm-${leaf}" >/dev/null 2>&1; then
+                cname="vllm-${leaf}"
+            elif docker inspect "vllm_node" >/dev/null 2>&1; then
+                cname="vllm_node"
+            else
+                echo "  ✗ ${cname} is not running"; continue
+            fi
         fi
         echo "  Logs for ${cname} — Ctrl+C to stop"
         echo ""
