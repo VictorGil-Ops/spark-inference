@@ -194,6 +194,15 @@ download_hf() {
             ${HF_TOKEN:+--token "$HF_TOKEN"} \
             --local-dir-use-symlinks False
     else
+        if ! python3 -c "import huggingface_hub" >/dev/null 2>&1; then
+            echo "  ✗ Missing Python package: huggingface_hub"
+            echo ""
+            echo "     Install it in the active Python environment:"
+            echo "       python3 -m pip install huggingface_hub"
+            echo ""
+            echo "     Then retry: ./scripts/run.sh → h<num>"
+            return 1
+        fi
         python3 - "$model_id" "${HF_TOKEN:-}" <<'PYEOF'
 import sys
 from huggingface_hub import snapshot_download
